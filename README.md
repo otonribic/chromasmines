@@ -1,4 +1,4 @@
-# chromasmines
+# Chromas Mines
 Dark Forces game palette editor
 
 App for Python 3.7+
