@@ -1,5 +1,5 @@
 COLORTHEMES={
- 'Leaving Orinackra (Default)':'DarkGrey11',
+ 'Leaving Orinackra':'DarkGrey11',
  'Midnight on Coruscant':'Black',
  "Leia's Dream":'BlueMono',
  'New Tyderian Shuttle':'BrownBlue',
@@ -17,7 +17,7 @@ COLORTHEMES={
  'The Caldoun Conundrum':'DarkGreen1',
  'Factory X7 Drekker':'DarkGreen4',
  'Auto Gun Spree':'DarkGrey12',
- 'Phrik Freak':'DarkGrey14',
+ 'Phrik Freak (Default)':'DarkGrey14',
  'Sequencer Set. Run!!!':'DarkGrey4',
  'LAARC':'DarkGrey7',
  'Talay Sky':'DarkPurple2',
@@ -44,6 +44,7 @@ KEYBOARDSHORTCUTS='''N - New
 O - Open 
 S - Save 
 A - Save as
+Q - Quit
 U - Undo
 B - Toggle swatch borders
 - - Reverse map light orientation
@@ -55,6 +56,7 @@ J - General palette adjustments
 G - Auto-gradient
 M - Merge with another palette
 C - Copy selected color
+L - Make selected color luminous in the map
 \ - Toggle viewing selected color in the map
 F2 - Auto-calculate map
 F3 - Preview a bitmap
@@ -75,7 +77,10 @@ Q: Why can I never find color map auto-calculation settings that yield the origi
 A: Mostly because they probably cannot exist in the first place. There are several hints pointing to the original color maps having been created through some kind of a semi-manual process with many custom adjustments and fine changes. These maps are very non-linear in order to, one would conjecture, help the players at low light levels. Also, some map segments are certainly not a result of calculation, but rather an attempt to improvise without all necessary colors. (E.g. Secret Base, range 192-207.)
 
 Q: Isn't the GUI a bit cruder than it used to be in ChromaForces 1?
-A: This all arises from the GUI framework chosen for this project. It is obviously not the most sophisticated one ever, but it does the job, it was simple enough to use, and fast enough to develop with - both of which are important points if you're making a living doing something else than writing game palette editors. Or, put it this way: going for a super-advanced GUI solution would likely sentence the project to being just another case of an overambitious goal, that would never get finished.'''
+A: This all arises from the GUI framework chosen for this project. It is obviously not the most sophisticated one ever, but it does the job, it was simple enough to use, and fast enough to develop with - both of which are important points if you're making a living doing something else than writing game palette editors. Or, put it this way: going for a super-advanced GUI solution would likely sentence the project to being just another case of an overambitious goal, that would never get finished.
+
+Q: After selecting some DF presets, why do the map and the palette not update?
+A: Because they are actually identical for a large share of levels. Only a couple of levels have different palettes and maps, actually.'''
 
 
 ABOUTTEXT='''Dark Forces palette and colormap (.PAL and .CMP) editor. Trying to give something back to the great community formed around this legendary old game! (Hopefully it leads to some nice new custom missi- *CLICK*STATIC*)

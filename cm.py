@@ -5,7 +5,7 @@ Python 3.7
 
 Dark Forces Palette & Colormap editor
 by
-Fish (oton.ribic@bug.hr), 2021
+Fish (oton.ribic@bug.hr), 2021-2023
 Cindy Winter (xxxxx.xxxxxx@xxxxxx.xx.xx), 2021
 
 Python 3.7
@@ -47,7 +47,19 @@ X add label about engine color behavior in colormap
 For 0.100
 X color map auto homogenization
 
-1,0 RELEASE
+1.0 RELEASE
+
+1.1 RELEASE
+X raindrop auto-generate method
+X use arrow keys for vertical navigation
+X can leave with Q now
+X Phrik Freak is the new default color theme
+X Added unbalance
+X Added 'make the current color luminous'
+X Added Export to paletted image
+X Added DF-21 link
+X Tearable menus
+X Psychodelic hue shift algorithm for autocalculation
 '''
 
 import webbrowser
@@ -62,9 +74,9 @@ import colorsys
 DEBUG_MODE = True
 
 APPNAME = 'Chromas Mines'
-APPVERSION = '1.0'
+APPVERSION = '1.1'
 ICONFILE = 'cm.ico'
-COLORTHEME = 'Leaving Orinackra (Default)'  # Default color theme
+COLORTHEME = 'Phrik Freak (Default)'  # Default color theme
 FONT_PALETTE = 'Tahoma'
 FONT_PALETTE_SIZE = 8
 SWATCH_BORDER = 0  # Width of lines
@@ -287,21 +299,24 @@ def init_Main_window():  # \Main
                   ['&Palette', ['&Tint... (T)', 'General &adjustments... (J)', 'Auto-&gradient... (G)',
                                 'Progressive &saturation...',
                                 '---',
-                                '&Import from paletted image...', '&Merge with... (M)', '&Sort...',
+                                '&Import from paletted image...', 'E&xport to paletted image...',
+                                '&Merge with... (M)', '&Sort...',
                                 '---',
                                 '&Copy selected color... (C)',
                                 '&Redundancy and consistency checks... (F9)',
                                 'Coverage scatter &plot...']],
                   ['&Map', ['&Auto-calculate... (F2)', '&Solve unevennesses...',
-                            'Linear &homogenization...', '---',
+                            'Linear &homogenization...', '&Unbalance...', '---',
                             '&Preview bitmap... (F3)', '&Replace map with... (F4)',
                             '&Mass replace colors... (F8)', 'E&xport to image...',
-                            '&Load from image...', '---', '&Toggle selected color (\\)', ]],
+                            '&Load from image...', '---', 'Ma&ke selected color luminous (L)',
+                            '&Toggle selected color (\\)', ]],
                   ['Pre&sets', MENUlevels],
                   ['&Help',
-                   ['&Tutorial...', '&About...', '&Whys and becauses...', '&Keyboard shortcuts...']],
+                   ['&Tutorial...', '&About...', '&Dark Forces community...', '&Whys and becauses...',
+                    '&Keyboard shortcuts...']],
                   ]
-    Wlayout = [[sg.Menu(MENUlayout, tearoff=False, key='menu')],
+    Wlayout = [[sg.Menu(MENUlayout, tearoff=True, key='menu')],
                [sg.T('Current palette')],
                [sg.Graph(canvas_size=(32 * SCALE, 8 * SCALE), background_color='#111111', key='palette',
                          graph_bottom_left=(0, 256), graph_top_right=(1024, 0), enable_events=True)],
@@ -482,6 +497,8 @@ def calc_color_map(
     method - 1: straight from full darkness (black) to the desired color
              2: from the currently selected color to the desired color
              3: from full darkness to the selected color used as a mask (water effect)
+             4: raindrop trickle algorithm (ignores light ranges)
+             5: psychodelic hue shift (ignores light ranges)
     priority - 0: find the nearest color to the calculated one via RGB
                1: find the nearest color to the calculated one via HSB
                2: prioritize correct hue
@@ -523,27 +540,95 @@ def calc_color_map(
         # Find the deltas
         deltargb = [targetrgb[c] - sourcergb[c] for c in (0, 1, 2)]
 
-        # Now iterate over lights
-        for step, light in enumerate(applylightrange):
-            # Deal with some special cases
-            # Luminescents, just keep original color
-            if keepluminescent and mapcol <= 23:
-                wmap[mapcol][light] = mapcol
-                continue
-            # Ignored colors
-            if ignore2431 and mapcol >= 24 and mapcol <= 31:
-                continue
+        # Now iterate over lights with given start and end colors
+        if method in [1, 2, 3]:  # Standard linear approximators
+            for step, light in enumerate(applylightrange):
+                # Deal with some special cases
+                # Luminescents, just keep original color
+                if keepluminescent and mapcol <= 23:
+                    wmap[mapcol][light] = mapcol
+                    continue
+                # Ignored colors
+                if ignore2431 and mapcol >= 24 and mapcol <= 31:
+                    continue
 
-            # Special cases taken care of, resume to do actual color picking from here
-            loclight = round(projection[0] + projstep * step)
-            mixlight = loclight / 31  # Get 0..1 for easier "mixing"
-            # Mixlight is now the transition 0..1 from source- to targetrgb
-            # Get the color
-            mixed = [norm255(sourcergb[c] + deltargb[c] * mixlight) for c in (0, 1, 2)]
-            # Now find the best matching color in the palette to 'mixed'
-            nearest = get_nearest_color(mixed, priority, reverseorder)
-            # Finaklly, update in the colormap
-            wmap[mapcol][light] = nearest
+                # Special cases taken care of, resume to do actual color picking from here
+                loclight = round(projection[0] + projstep * step)
+                mixlight = loclight / 31  # Get 0..1 for easier "mixing"
+                # Mixlight is now the transition 0..1 from source- to targetrgb
+                # Get the color
+                mixed = [norm255(sourcergb[c] + deltargb[c] * mixlight) for c in (0, 1, 2)]
+                # Now find the best matching color in the palette to 'mixed'
+                nearest = get_nearest_color(mixed, priority, reverseorder)
+                # Finally, update in the colormap
+                wmap[mapcol][light] = nearest
+
+        # Special raintrickle method does not iterate over lights directly
+        if method == 4:
+            # This iterates from the lightest to the darkest
+            # but descend from the brightest (real) color
+
+            wmap[mapcol][31] = mapcol
+            for light in range(30, -1, -1):
+
+                # Deal with some special cases
+                # Luminescents, just keep original color
+                if keepluminescent and mapcol <= 23:
+                    wmap[mapcol][light] = mapcol
+                    continue
+                # Ignored colors
+                if ignore2431 and mapcol >= 24 and mapcol <= 31:
+                    continue
+
+                # Get the reference color
+                reference = Mpalette[wmap[mapcol][light + 1]]
+                rr, rg, rb = reference
+                mono = rr == rg == rb  # Special case if it's monochromatic
+                # Find nearest darker color (yet not the same one!)
+                bestcol = 0  # Index of the best color
+                nearest = 768  # Best match so far
+                for search in range(0, 256):
+                    ser, seg, seb = Mpalette[search]
+                    lightdiff = sum([ser - rr, seg - rg, seb - rb])
+                    if lightdiff >= 0:
+                        # The checked color is same or brighter; discard it
+                        continue
+                    # Calculate total difference
+                    lightdiff = sum([abs(ser - rr), abs(seg - rg), abs(seb - rb)])
+                    # Check the difference
+                    if lightdiff < nearest:
+                        # Check if the special case of monochromeness
+                        if mono and not (ser == seg == seb): continue
+                        # Found a better match
+                        nearest = lightdiff
+                        bestcol = search
+                # Fallback to the same reference color if no better candidates were found
+                if nearest == 768:
+                    bestcol = wmap[mapcol][light + 1]
+                wmap[mapcol][light] = bestcol
+
+        # Hue shift over the light range
+        if method == 5:
+            for light in range(32):
+                # Deal with some special cases
+                # Luminescents, just keep original color
+                if keepluminescent and mapcol <= 23:
+                    wmap[mapcol][light] = mapcol
+                    continue
+                # Ignored colors
+                if ignore2431 and mapcol >= 24 and mapcol <= 31:
+                    continue
+
+                # Get reference RGB
+                rr, rg, rb = Mpalette[mapcol]
+                # Calculate HSV offset
+                h, s, v = colorsys.rgb_to_hsv(rr, rg, rb)
+                h += light / 32
+                tr, tg, rb = colorsys.hsv_to_rgb(h, s, v)
+                # Find match
+                nearest = get_nearest_color((tr, tg, rb), 0)
+                # Update in the temporary colormap
+                wmap[mapcol][light] = nearest
 
     return wmap
 
@@ -1324,7 +1409,7 @@ def import_paletted_img():
               [sg.Button('Cancel', size=(15, 1)),
                sg.Button('Load palette', size=(15, 1), focus=True)],
               ]
-    Win = sg.Window('Auto-gradient',
+    Win = sg.Window('Import palette from image',
                     layout=WINlay,
                     resizable=False,
                     finalize=True,
@@ -1508,12 +1593,16 @@ def auto_calculate_map():
         [sg.T('\nCALCULATION PARAMETERS')],
         [sg.T('Projected light range:'), sg.In('0', size=(8, 1), key='projfrom'),
          sg.T('to'), sg.In('31', size=(8, 1), key='projto'), ],
-        [sg.Frame('Color light transition method', element_justification='left', layout=[
-            [sg.Radio('From full black to maximum brightness (Typical)', group_id=0, key='met1')],
+        [sg.Frame('Calculation method', element_justification='left', layout=[
+            [sg.Radio('Linear from full black to maximum brightness (Typical)', group_id=0, key='met1')],
             [sg.Radio('From selected color to maximum brightness (Distance haze effect)',
                       group_id=0, key='met2')],
             [sg.Radio('Use selected color as a color limiter (Water/Alert light effect)',
                       group_id=0, key='met3')],
+            [sg.Radio('Rain trickle algorithm (Favours map homogeneity, ignores light ranges)',
+                      group_id=0, key='met4')],
+            [sg.Radio('Hue shift (Ignores light ranges, light-change psychodelics)',
+                      group_id=0, key='met5')],
         ])],
         [sg.Frame('Color choice', element_justification='left', layout=[
             [sg.Radio('Find the color nearest to the calculated one (RGB)', group_id=1, key='ch0')],
@@ -1591,7 +1680,9 @@ def auto_calculate_map():
             # Determine method
             if keys['met1']: method = 1
             elif keys['met2']: method = 2
-            else: method = 3
+            elif keys['met3']: method = 3
+            elif keys['met4']: method = 4
+            else: method = 5
             # Determine choice priority
             if keys['ch0']: priority = 0
             elif keys['ch1']: priority = 1
@@ -1716,6 +1807,12 @@ def preview_pal_bmp():
                     modal=True,
                     icon=ICONFILE,
                     margins=(20, 20))
+
+    # Temporarily create a tuple map for faster operation
+    tempmap = copy.deepcopy(Mcolormap)
+    tempmap = [tuple(e) for e in tempmap]
+    tempmap = tuple(tempmap)
+
     # Event loop
     while True:
         action, keys = Win.read()
@@ -1746,13 +1843,13 @@ def preview_pal_bmp():
             # Iterate over "pixelation"
             Win['prevgraph'].erase()
             try:
+                reflight = round(int(keys['ltslider']))
                 for nx in range(img.size[0]):
                     for ny in range(img.size[1]):
                         if nx < 256 and ny < 256:
                             # Copy pixels
                             refcol = px[nx, ny]
-                            reflight = round(int(keys['ltslider']))
-                            loccol = Mcolormap[refcol][reflight]
+                            loccol = tempmap[refcol][reflight]
                             Win['prevgraph'].draw_point((loffset + nx, toffset + ny), size=1,
                                                         color=gethexcol(*Mpalette[loccol]))
             except BaseException:
@@ -2312,6 +2409,150 @@ def lin_homogenize():
             Win.close()
             draw_all()
 
+# Unbalance the map colors acccording to a given curve
+
+
+def unbalance():
+    global Mcolormap
+
+    WINlay = [[sg.T('Affected color map range:'), sg.In('0', size=(8, 1), key='rangefrom'),
+               sg.T('to'), sg.In('255', size=(8, 1), key='rangeto'),
+               sg.Button('0-255', key='0255'), sg.Button('32-255', key='32255')],
+              [sg.T('')],
+              [sg.T('Disbalance pivot')],
+              [sg.T('Brighter'),
+               sg.Slider(range=(-10, 10), orientation='horizontal', enable_events=True,
+                         size=(50, 20), key='slider',
+                         default_value=0),
+               sg.T('Darker')],
+              [sg.T('')],
+              [sg.Button('Cancel', size=(15, 1)), sg.Button('Apply', size=(15, 1), focus=True)],
+              ]
+    Win = sg.Window('Unbalance the map',
+                    layout=WINlay,
+                    resizable=False,
+                    finalize=True,
+                    element_justification='center',
+                    font=(FONT_WINDOW, FONT_WINDOW_SIZE),
+                    modal=True,
+                    icon=ICONFILE,
+                    margins=(20, 20))
+
+    # Event loop
+    while True:
+        action, keys = Win.read()
+        if DEBUG_MODE: print(action, keys)
+
+        # Cancel/close
+        if action == sg.WIN_CLOSED or action == 'Exit':
+            break
+        if action == 'Cancel':
+            Win.close()
+            break
+
+        # Color range quick presets
+        if action == '0255':
+            Win['rangefrom'].update(value='0')
+            Win['rangeto'].update(value='255')
+        elif action == '32255':
+            Win['rangefrom'].update(value='32')
+            Win['rangeto'].update(value='255')
+
+        # OK, apply
+        if action == 'Apply':
+            # Check applicable range first
+            try:
+                applyrange = range(int(keys['rangefrom']), int(keys['rangeto']) + 1)
+            except BaseException:
+                popup('Please enter a valid color range!')
+                continue
+            save_undo()
+            # Check the curvature
+            expo = keys['slider']  # The exponential to use
+            if expo == 0:
+                # No change! Just return
+                Win.close()
+                break
+            # Otherwise, there is some curvature
+            # Normalize and align the exponential
+            if expo > 1: expo = 1 + expo / 4
+            else: expo = 1 / (1 + abs(expo) / 4)
+            # Apply per each color in the map
+            for col in applyrange:
+                # Define temporary map
+                localmap = []
+                # Range over lights and calculate
+                for light in range(32):
+                    locl = light / 31
+                    locl = locl**expo
+                    locl = round(locl * 31)
+                    localmap.append(Mcolormap[col][locl])
+                Mcolormap[col] = copy.deepcopy(localmap)
+            Win.close()
+            draw_all()
+
+# Make selected color luminous in the color map
+
+
+def make_sel_luminous():
+    global Mcolormap
+    save_undo()
+    for light in range(0, 32):
+        Mcolormap[Mselcolor][light] = Mselcolor
+    draw_all()
+
+# Export the palette to a paletted image 256x1 px
+
+
+def export_paletted_img():
+
+    WINlay = [[sg.T('File to export the palette to:')],
+              [sg.In(key='oimg'), sg.FileSaveAs('Browse BMP',
+                                                file_types=(('Bitmaps', '*.BMP'),),), ],
+              [sg.T('')],
+              [sg.Button('Cancel', size=(15, 1)),
+               sg.Button('Export', size=(15, 1), focus=True)],
+              ]
+    Win = sg.Window('Export palette to image',
+                    layout=WINlay,
+                    resizable=False,
+                    finalize=True,
+                    element_justification='center',
+                    font=(FONT_WINDOW, FONT_WINDOW_SIZE),
+                    modal=True,
+                    icon=ICONFILE,
+                    margins=(20, 20))
+    # Event loop
+    while True:
+        action, keys = Win.read()
+        if DEBUG_MODE: print(action, keys)
+
+        # Cancel/close
+        if action == sg.WIN_CLOSED or action == 'Exit':
+            break
+        if action == 'Cancel':
+            Win.close()
+            break
+
+        # OK/apply
+        if action == 'Export':
+            # Try to set palette in a new image
+            try:
+                img = pil.new('P', (256, 1), 0)
+                px = img.load()
+                temppal = []  # Collector
+                for x in range(256):
+                    px[x, 0] = x
+                    temppal.extend(Mpalette[x])
+                img.putpalette(temppal)
+                img.save(keys['oimg'])
+            except BaseException:
+                popup('Failed saving image. (May be related to insufficient write permissions.)')
+                continue
+            # Cleanup
+            Win.close()
+            draw_all()
+
 
 #########################
 # GENERAL LAYOUT START \3
@@ -2382,7 +2623,7 @@ while True:
         save_files_as()
 
     # Menu: Quit
-    if action == 'Quit':
+    if action == 'Quit' or action == 'q':
         Main.close()  # To properly clean behind itself
         break
 
@@ -2470,6 +2711,10 @@ while True:
     if action == 'Import from paletted image...':
         import_paletted_img()
 
+        # Menu: Import from paletted image
+    if action == 'Export to paletted image...':
+        export_paletted_img()
+
     # Menu: Merge with another palette
     if action == 'Merge with... (M)' or action == 'm':
         merge_palette()
@@ -2490,6 +2735,10 @@ while True:
     if action == 'Linear homogenization...':
         lin_homogenize()
 
+    # Menu: Unbalance
+    if action == 'Unbalance...':
+        unbalance()
+
     # Menu: Merge with another colormap
     if action == 'Replace map with... (F4)' or action.startswith('F4:'):
         merge_colormap()
@@ -2501,6 +2750,10 @@ while True:
     # Menu: Load colormap from approximated image
     if action == 'Load from image...':
         load_cmp_from_image()
+
+    # Menu: Make selected color luminous
+    if action == 'Make selected color luminous (L)' or action == 'l':
+        make_sel_luminous()
 
     # Menu: Mass replace indexes in color map
     if action == 'Mass replace colors... (F8)' or action.startswith('F8:'):
@@ -2527,6 +2780,11 @@ while True:
     # Menu: Tutorial
     if action == 'Tutorial...':
         webbrowser.open('https://www.youtube.com/watch?v=PYlLuws_JQU')
+        continue
+
+    # Menu: Community
+    if action == 'Dark Forces community...':
+        webbrowser.open('https://www.df-21.net')
         continue
 
     # Menu: About
@@ -2607,6 +2865,18 @@ while True:
     if action == 'NextColor' or action.startswith('Right:'):
         Mselcolor += 1
         if Mselcolor >= 256: Mselcolor = 0
+        draw_all()
+
+    # Move selection to previous row
+    if action.startswith('Up:'):
+        Mselcolor -= 32
+        if Mselcolor < 0: Mselcolor += 256
+        draw_all()
+
+    # Move selection to next row
+    if action.startswith('Down:'):
+        Mselcolor += 32
+        if Mselcolor >= 256: Mselcolor -= 256
         draw_all()
 
     # Modify a current color
