@@ -1,44 +1,44 @@
 COLORTHEMES={
- 'Leaving Orinackra':'DarkGrey11',
- 'Midnight on Coruscant':'Black',
- "Leia's Dream":'BlueMono',
- 'New Tyderian Shuttle':'BrownBlue',
- 'Crix! Are you in there?':'Dark',
- 'Weekend in Nar Shaddaa':'DarkAmber',
- 'Cannon Locked and Loaded':'DarkBlack1',
- 'TIE Interceptors Inbound':'DarkBlue',
  'Aboard a Rebel Frigate':'DarkBlue13',
- 'Reactor Room':'DarkBlue15',
- 'Interstellar Dust':'DarkBlue3',
- 'Smelter Control Parts':'DarkBrown3',
- 'Phase 1 Spots You':'DarkBrown4',
- 'The Nightfall':'DarkBrown7',
- 'Endor or Bust':'DarkGreen',
- 'The Caldoun Conundrum':'DarkGreen1',
- 'Factory X7 Drekker':'DarkGreen4',
- 'Auto Gun Spree':'DarkGrey12',
- 'Phrik Freak (Default)':'DarkGrey14',
- 'Sequencer Set. Run!!!':'DarkGrey4',
- 'LAARC':'DarkGrey7',
- 'Talay Sky':'DarkPurple2',
- 'Dianoga Has Second Thoughts':'DarkPurple4',
- "Jabba's Awful Kitsch":'DarkPurple5',
- 'Condition Even Redder':'DarkRed2',
- 'Phase 2 Fires a Missile':'DarkTanBlue',
- 'Smuggler Ship Secured, Sort Of':'Default',
- 'Stouker Does Its Job':'LightBlue',
  'Anteevy Frost Vacation':'LightBrown1',
  'Approaching Anoat':'LightBrown10',
- 'Headscratching on Gromas':'LightBrown13',
- 'Supposedly Secret Base':'Python',
+ 'Auto Gun Spree':'DarkGrey12',
  'Bespin Commotion':'Reddit',
+ 'Cannon Locked and Loaded':'DarkBlack1',
+ 'Condition Even Redder':'DarkRed2',
+ 'Crix! Are you in there?':'Dark',
+ 'Dianoga Has Second Thoughts':'DarkPurple4',
+ 'Endor or Bust':'DarkGreen',
  'Escaping the Kurek Eruption':'Reds',
- "Priga's Final Hours":'LightTeal',
  'Ever Deeper Into Ironfort':'DarkTeal2',
- 'Harkov Turns His Coat':'LightPurple',
- 'Intricacies of Coober':'LightGrey3',
  'Ewok Stares in Disbelief':'DarkGrey2',
- }
+ 'Factory X7 Drekker':'DarkGreen4',
+ 'Harkov Turns His Coat':'LightPurple',
+ 'Headscratching on Gromas':'LightBrown13',
+ 'Interstellar Dust':'DarkBlue3',
+ 'Intricacies of Coober':'LightGrey3',
+ "Jabba's Awful Kitsch":'DarkPurple5',
+ 'LAARC':'DarkGrey7',
+ 'Leaving Orinackra':'DarkGrey11',
+ "Leia's Dream":'BlueMono',
+ 'Midnight on Coruscant':'Black',
+ 'New Tyderian Shuttle':'BrownBlue',
+ 'Phase 1 Spotted You':'DarkBrown4',
+ 'Phase 2 Fires a Missile':'DarkTanBlue',
+ 'Phrik Freak':'DarkGrey14',
+ "Priga's Final Hours":'LightTeal',
+ 'Reactor Room':'DarkBlue15',
+ 'Sequencer Set. Run!!!':'DarkGrey4',
+ 'Smelter Control Parts':'DarkBrown3',
+ 'Smuggler Ship Secured, Sort Of':'Default',
+ 'Stouker Does Its Job':'LightBlue',
+ 'Supposedly Secret Base':'Python',
+ 'TIE Interceptors Inbound (Default)':'DarkBlue',
+ 'Talay Sky':'DarkPurple2',
+ 'The Caldoun Conundrum':'DarkGreen1',
+ 'The Nightfall':'DarkBrown7',
+ 'Weekend in Nar Shaddaa':'DarkAmber',
+}
  
 KEYBOARDSHORTCUTS='''N - New
 O - Open 
@@ -49,15 +49,16 @@ U - Undo
 B - Toggle swatch borders
 - - Reverse map light orientation
 Z - Specify window size
-[ - Reduce window size
-] - Increase window size
+[/] - Change window size
+</> - Change window theme
 T - Tint palette
 J - General palette adjustments
 G - Auto-gradient
 M - Merge with another palette
 C - Copy selected color
 L - Make selected color luminous in the map
-\ - Toggle viewing selected color in the map
+\\ - Toggle viewing selected color in the map
+R - Richards distribution
 F2 - Auto-calculate map
 F3 - Preview a bitmap
 F4 - Replace the map
@@ -89,10 +90,11 @@ This is freeware. It may be freely distributed as long as it is not modified in 
 
 No warranty at all for anything - use at your own risk.
 
-Many thanks to Adam Richards for insight, suggestions and testing, and to Cindy Winter for her help with some intricacies of color calculations.
+Many thanks to Adam Richards for insight, suggestions, and testing. Also for proposing a new map distribution algorithm in v1.3. (Henceforth to be known as the Richards distribution!)
+Thanks also to the Dark Forces community, especially the excellent folks at http://www.df-21.net. If you are a Dark Forces fan, join! And thanks to N.Jankowski for developing DF file libraries (which this project uses to disassemble BM files).
 
 -Fish
-(Oton Ribic - oton.ribic@bug.hr)'''
+(Oton Ribic - oton.ribic@gmail.com)'''
 
 
 AUTOHOMOGENIZEHINTS='''The purpose of this feature is to try sacrificing some colors in the palette, which are either unused or are not critically important, for the sake of avoiding abrupt changes in some areas of the color map. E.g. you've found a hue of violet you are happy with, but you're unhappy about it suddenly turning into grey at some light.
@@ -104,6 +106,30 @@ Then, enter the list of colors in the palette, comma-separated, which you are re
 The theoretical ideal transitions from the zero-light to full-brightness (0-31) will be calculated for all the colors in the given range, and the worst "offenders" in the current map found. These will be replaced with the corresponding ideal color, and the process repeated as long as there are colors to use.
 
 Note that using many colors on a wide range may take a while, so don't be alarmed if it takes half a minute or so.'''
+
+
+REMAPHINTS='''This feature finds a requested number of pairs of the most similar colors in the current palette. Based on these, it proposes substitutions of colors, e.g. replacing the color indices of one color with another one in the color map, therefore freeing up the slots in the palette for new colors or entire new ranges. This is often easily possible because the default Dark Forces palettes include multiple identical colors, and many pairs of colors whose differences are negligible.
+
+After you click on the Auto-calculate button, the proposals will be listed in the changes field, in the format Source>Destination indices, with the 'source' being the color that is replaced by 'destination'. Chromas Mines will always give advantage to the lower index, i.e. it will be the higher index color that is "sacrificed" to make room and remapped to a color of lower index. After the #, there will be a comment noting the total RGB difference between the two colors in question.
+
+Note that the field is editable, and you can edit the proposal, or write your own change plan from scratch, or paste one. As long as you follow the source>destination format (or sacrificed>new, in other words), it will be accepted - and you can write a comment after the # sign in each line.
+
+Clicking on the Accept/Apply button makes Chromas Mines read the changes (the source and destination indices), free up the source color, change it to the given value, and apply the changes to the color map as well (so that all the references to the source index point to the destination index instead).
+
+This process, of course, implies that the existing .BM files built for another palette (e.g. SECBASE.PAL) will no longer work. Therefore, at the next step, if you chose so, you will be offered to remap a set of BM files you intend to use in your project, to have them fit the changed palette. It would be clever to copy and paste the configuration string from the field elsewhere, to be able to reconstruct the process later if needed, and remap further BM's. (Though the BM remapper has its own configuration strings, too.)
+
+The point of the entire process is to introduce new shades or hues of colors in your project, without compromising the existing palette. Each step, i.e. each pair in the palette, is handled through the following steps: (1) moving all the subsequent colors one step left, (2) setting the last color to the default, (3) updating the color map with the same leftward step, (4) updating all color map references from the source color to the destination one.'''
+
+
+ADAPTPALETTE='''You can use this feature to adapt BM files from one palette to another. E.g. if you want to use certain BM's originally drawn for NARSHADA.PAL yet you are using SECBASE.PAL for your project, this is where you can calculate the necessary conversions to find the nearest replacement colors, and execute these remappings.
+
+The source palette is required as a PAL file, whereas the destination can be either the palette you are currently having open in the editor, or another PAL file.
+
+Whichever the case, the algorithm between the two palettes will firstly check if the color to be translated is already available in the destination palette under the same number. If yes, it will always prefer it. If not, it will find the closest match in the destination palette.
+
+The one exception is the separation between 0-23 and 31-255 ranges, if enabled: since 0-23 are typically full bright colors, you will typically want to have those mapped among themselves, and the standard colors to the standard ones. Special colors 24-31 are ignored in all cases.
+
+The process calculates the necesarry remapping and leads you to the mass remap dialog once the calculation is complete.'''
 
 
 AUTOMAPHINTS='''Map auto-calculation is possibly among the more complex features of this application, so here's a quick intro to get you started.

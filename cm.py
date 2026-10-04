@@ -1,14 +1,11 @@
 '''
 CHROMAS MINES
 
-Python 3.7
+Python 3.7+
 
 Dark Forces Palette & Colormap editor
 by
-Fish (oton.ribic@bug.hr), 2021-2023
-Cindy Winter (xxxxx.xxxxxx@xxxxxx.xx.xx), 2021
-
-Python 3.7
+Fish (oton.ribic@gmail.com), 2021-2026
 
 To Add for 0.9:
 X progress bar on map autocalculation
@@ -35,7 +32,7 @@ For 0.96
 X reverse sort
 
 For 0.97
-- finalize help video link
+X finalize help video link
 X flashlight editor and slider
 
 For 0.98
@@ -60,31 +57,57 @@ X Added Export to paletted image
 X Added DF-21 link
 X Tearable menus
 X Psychodelic hue shift algorithm for autocalculation
+
+1.2 RELEASE
+X now has the trickle & stretch algorithm for automapping
+X copy light levels in the lightmap feature introduced
+X slightest of changes in the contrast color calculations
+X new set map range feature
+X can now resize window with mouse wheel
+X clicking on colormap now selects the clicked, not the column color
+  if clicked with left button, and the actual column if with the
+  right mouse button
+
+1.3 RELEASE
+X New icon
+B fixed window icon loading
+X Now also support DF BM for previewing, not just Windows BMP
+X Export to a GPL palette
+X Export to an ASE Adobe palette
+X Color map ranges projecting
+X Secbase's "refer and stretch" mapping algorithm (the Richards distribution)
+X Mass remap BM's manually
+X Autoreduce palette and remap
+X Convert BM's between palettes
+X Construct hue-uniform nice palettes from scratch
+X Use < and > to quickly change theme
 '''
 
 import webbrowser
-import PySimpleGUI as sg
+import FreeSimpleGUI as sg
 import cmconst
 import copy
 from PIL import Image as pil
 import colorsys
+import os
+import sys
+import bm
+import glob
+import ase
 
 # GENERAL PSEUDO-CONSTANTS
 
-DEBUG_MODE = True
-
 APPNAME = 'Chromas Mines'
-APPVERSION = '1.1'
-ICONFILE = 'cm.ico'
-COLORTHEME = 'Phrik Freak (Default)'  # Default color theme
+ICON = 'cm.ico'
+APPVERSION = '1.3'
+COLORTHEME = 'TIE Interceptors Inbound (Default)'  # Default color theme
 FONT_PALETTE = 'Tahoma'
-FONT_PALETTE_SIZE = 8
+FONT_PALETTE_SIZE = 10
 SWATCH_BORDER = 0  # Width of lines
 CURSOR_COLOR = '#FFFF00'  # On color map
 FONT_WINDOW = 'Tahoma'
 FONT_WINDOW_SIZE = 10
 UNDO_LEVELS = 20
-POPUP_BACKCOLOR = '#040313'
 REVERSE_LIGHT = False  # Whether colormap light is oriented downwards or upwards
 COLOR_MATCHING_PRIO_FACTOR = 5  # Factor by which the priority picking will be pondered
 SCALE = 32  # Multiplier which will determine the pixel size of window(s)
@@ -94,6 +117,14 @@ SCALE = 32  # Multiplier which will determine the pixel size of window(s)
 # Placeholder global variables
 Main = None
 
+# Determine true icon path (depending on whether running as .py or PyInstaller's .exe)
+if hasattr(sys, '_MEIPASS'):
+    ICONFILE = os.path.join(sys._MEIPASS, ICON)
+    DEBUG_MODE = False
+else:
+    ICONFILE = os.path.join(os.path.abspath('.'), ICON)
+    DEBUG_MODE = True
+# DEBUG_MODE = False # Override if needed
 
 def _get_unused_themes():
     '''[INTERNAL!] Show themes currently unused in CM.'''
@@ -105,11 +136,9 @@ def _get_unused_themes():
             print(theme, end=', ')
     quit()
 
-
 def popup(text):
     '''Show a generic popup with desired (possibly multiline) text.'''
     sg.popup_no_titlebar(text)
-
 
 def norm255(value):
     '''Normalize given value to integer 0-255.'''
@@ -117,7 +146,6 @@ def norm255(value):
     if value < 0: value = 0
     if value > 255: value = 255
     return value
-
 
 def gethexcol(r, g, b):
     '''Get convenient #RRGGBB hex code for a RGB 0-255 color.'''
@@ -128,24 +156,21 @@ def gethexcol(r, g, b):
     # Now format and return
     return '#{0:02x}{1:02x}{2:02x}'.format(r, g, b)
 
-
 def get_contrast_color(r, g, b):
     '''Get a color for drawing text on a given background color.
-    Return it in the convenient #001122 format.'''
-    if r + g + b > 384: ccol = '#000000'
+    Return it in the convenient #rrggbb format.'''
+    if r > 147 or g > 147: ccol = '#000000'
     else: ccol = '#FFFFFF'
     return ccol
 
-
 def load_palette(file):
-    '''Load a palette from a .PAL file and return a palette-formatted list of lists.'''
+    '''Load a .PAL file and return a palette-formatted list of 256 RGB triplets.'''
     inp = open(file, 'rb')
     fraw = inp.read()[0:768]  # Sanity measure
     inp.close()
     # Combine 768 bytes to 256 RGB triplets
     parsed = [[fraw[d] * 4, fraw[d + 1] * 4, fraw[d + 2] * 4] for d in range(0, 767, 3)]
     return parsed
-
 
 def save_palette(palette, filename):
     '''Save a given palette (list of RGB lists) to the DF palette of given path.'''
@@ -158,7 +183,6 @@ def save_palette(palette, filename):
     outf.write(bytes(palcontent))
     outf.close()
 
-
 def load_colormap(file):
     '''Load a colormap from a .CMP file and return colormap-formatted list of lists.'''
     inp = open(file, 'rb')
@@ -167,7 +191,6 @@ def load_colormap(file):
     # Combine 8192 bytes to 256 32-plets
     parsed = [list(fraw[d::256]) for d in range(0, 256)]
     return parsed
-
 
 def save_colormap(colormap, filename, flashlight=50):
     '''Save a given colormap (list of light maps) to the DF colormap of given path.
@@ -185,7 +208,6 @@ def save_colormap(colormap, filename, flashlight=50):
     # Convert and save
     outf.write(bytes(cmpcontent))
     outf.close()
-
 
 def draw_palette(palette):
     '''Redraw palette in the main window palette view and add index numbers.'''
@@ -212,7 +234,6 @@ def draw_palette(palette):
     Main['palette'].draw_rectangle((sx + 1, sy + 1), (sx + 31, sy + 31),
                                    line_color=curcolor, line_width=2)
 
-
 def draw_colormap(colormap):
     '''Redraw colormap in the main window colormap view.'''
     Main['colormap'].erase()
@@ -235,7 +256,6 @@ def draw_colormap(colormap):
     # Draw selected color's map
     xpos = Mselcolor * 4
     Main['colormap'].draw_rectangle((xpos, 0), (xpos + 4, 255), line_color=CURSOR_COLOR)
-
 
 def draw_light_range(lrange):
     Main['lightrange'].erase()
@@ -261,18 +281,14 @@ def draw_light_range(lrange):
         Main['lightrange'].draw_text(str(id), location=(id * 32 + 16, 23), text_location='center',
                                      color=fcol, font=[FONT_PALETTE, FONT_PALETTE_SIZE])
 
-
 def update_title():
     '''Update the title of the main screen to show filenames.'''
     Main.set_title(APPNAME + ' ' + APPVERSION + ' - ' + Mfiles[0] + ' • ' + Mfiles[1])
 
-
 def update_selcolor_def():
     '''Update the selected color displayed definition.'''
     Main['SCol'].update('Selected color - Index: {0}    RGB: {1}, {2}, {3}'.
-                        format(Mselcolor, *Mpalette[Mselcolor])
-                        )
-
+                        format(Mselcolor, *Mpalette[Mselcolor]))
 
 def draw_all():
     '''Redraw the entire app window.'''
@@ -282,36 +298,42 @@ def draw_all():
     update_title()
     update_selcolor_def()
 
-
 def init_Main_window():  # \Main
     global Main
-    '''Initialize PySimpleGUI main window.'''
+    '''Initialize FreeSimpleGUI main window.'''
 
     sg.theme(cmconst.COLORTHEMES[COLORTHEME])
 
     # Menu
     MENUlevels = [entry[0] + '::' + entry[1] for entry in cmconst.ORIGS]
     MENUlayout = [['&File', ['&New (N)', '&Open... (O)', '&Save (S)', 'Save &as... (A)',
-                             '---', '&Quit']],
+                             '---', '&Quit (Q)']],
                   ['&Edit', ['&Undo (U)', 'Toggle swatch &borders (B)',
                              '&Reverse light orientation (-)', '---',
                              'Window &size... (Z)', 'Window &theme...'], ],
                   ['&Palette', ['&Tint... (T)', 'General &adjustments... (J)', 'Auto-&gradient... (G)',
                                 'Progressive &saturation...',
                                 '---',
+                                'Auto-re&duce colors...',
+                                '---', 'C&onstruct palette...',
                                 '&Import from paletted image...', 'E&xport to paletted image...',
+                                'Export to GIMP pa&lette...', 'Export to Adobe S&watch palette...',
                                 '&Merge with... (M)', '&Sort...',
                                 '---',
                                 '&Copy selected color... (C)',
                                 '&Redundancy and consistency checks... (F9)',
                                 'Coverage scatter &plot...']],
-                  ['&Map', ['&Auto-calculate... (F2)', '&Solve unevennesses...',
+                  ['&Map', ['&Auto-calculate... (F2)', '&Richards distribution... (R)',
+                            '&Solve unevennesses...',
                             'Linear &homogenization...', '&Unbalance...', '---',
-                            '&Preview bitmap... (F3)', '&Replace map with... (F4)',
+                            'Replace map with... (F4)',
                             '&Mass replace colors... (F8)', 'E&xport to image...',
-                            '&Load from image...', '---', 'Ma&ke selected color luminous (L)',
-                            '&Toggle selected color (\\)', ]],
+                            '&Load from image...', '&Copy light level...',
+                            'Set ra&nge...', '&Project ranges...', '---',
+                            'Ma&ke selected color luminous (L)', '&Toggle selected color (\\)', ]],
                   ['Pre&sets', MENUlevels],
+                  ['&Bitmaps', ['&Preview BM or BMP... (F3)', 'Re&map BM files...',
+                                '&Adapt to a different palette...']],
                   ['&Help',
                    ['&Tutorial...', '&About...', '&Dark Forces community...', '&Whys and becauses...',
                     '&Keyboard shortcuts...']],
@@ -322,7 +344,7 @@ def init_Main_window():  # \Main
                          graph_bottom_left=(0, 256), graph_top_right=(1024, 0), enable_events=True)],
                [sg.T('Selected color - Index: 0    RGB: 0, 0, 0             ', key='SCol')],
                [sg.Button('◄ Prev', key='PreviousColor'), sg.Button('Next ►', key='NextColor'),
-                sg.Button('Modify color'), ],
+                sg.Button('Modify color'), sg.Button('↩ Undo', key='Undo')],
                [sg.T('Color light map')],
                [sg.Graph(canvas_size=(32 * SCALE, 8 * SCALE), background_color='#000000', key='colormap',
                          graph_bottom_left=(0, 256), graph_top_right=(1024, 0), enable_events=True)],
@@ -340,8 +362,11 @@ def init_Main_window():  # \Main
         font=(FONT_WINDOW, FONT_WINDOW_SIZE),
         margins=(SCALE / 2, SCALE / 2),
         return_keyboard_events=True,)
+    toppal = Main['palette']
+    toppal.bind('<Button-3>', '-RIGHTBUTTON')  # Reporting the right button
+    topmap = Main['colormap']
+    topmap.bind('<Button-3>', '-RIGHTBUTTON')  # Reporting the right button
     draw_all()
-
 
 def save_undo():
     '''Add the current palette and colormap to the undo register.'''
@@ -351,7 +376,6 @@ def save_undo():
     # Reached the maximum?
     while len(Mundo) > UNDO_LEVELS: Mundo = Mundo[1:]
 
-
 def undo():
     '''Revert to the latest living palette and colormap from the Mundo register.'''
     global Mpalette
@@ -359,7 +383,7 @@ def undo():
     global Mundo
     # Is there anything to undo in the first place?
     if not Mundo:
-        popup('Bugger! No further undoing is possible.')
+        popup('No further undoing is possible.')
         return
     # There IS something - let's apply the Undoing
     Mpalette = Mundo[-1][0]
@@ -367,7 +391,6 @@ def undo():
     # Snip that one away
     Mundo = Mundo[:-1]
     draw_all()
-
 
 def calc_tint(operation=0, targetrgb=(0, 0, 0), mix=50):
     '''Calculate tinted palette of Mpalette, with given:
@@ -391,7 +414,6 @@ def calc_tint(operation=0, targetrgb=(0, 0, 0), mix=50):
         workp[id] = rgb  # Update
 
     return workp
-
 
 def palette_check():
     '''Performs various checks of sensibility and quality of the palettes and returns them as
@@ -422,7 +444,6 @@ def palette_check():
 
     # Collect all together and return it
     return [duplicates, unused]
-
 
 def calc_adjustments(brig, cont, gamma, sat):
     '''Get Mpalette and apply various standard adjustments, based on:
@@ -455,7 +476,6 @@ def calc_adjustments(brig, cont, gamma, sat):
 
     return wpal
 
-
 def generate_gradient(fcol, lcol):
     '''Generate a gradient on Mpalette starting with fcol and ending with lcol (includive).'''
     # Check if the order is reverse - correct it if so
@@ -478,7 +498,6 @@ def generate_gradient(fcol, lcol):
         wpal[fcol + step] = new
     return wpal
 
-
 def calc_color_map(
         applycolorrange,
         applylightrange,
@@ -499,6 +518,7 @@ def calc_color_map(
              3: from full darkness to the selected color used as a mask (water effect)
              4: raindrop trickle algorithm (ignores light ranges)
              5: psychodelic hue shift (ignores light ranges)
+             6: raindrop trickle, but stretching results over required light range
     priority - 0: find the nearest color to the calculated one via RGB
                1: find the nearest color to the calculated one via HSB
                2: prioritize correct hue
@@ -630,8 +650,65 @@ def calc_color_map(
                 # Update in the temporary colormap
                 wmap[mapcol][light] = nearest
 
-    return wmap
+        # Trickle over available area
+        if method == 6:
+            # This iterates from the lightest to the darkest
+            # by nearest neighbors and distributes across available area
 
+            collector = [mapcol]  # Starting with the actual color
+            for tmp in range(256):  # Limit to 256 iterations just in case
+                # Get the reference color
+                reference = Mpalette[collector[-1]]
+                rr, rg, rb = reference
+                mono = rr == rg == rb  # Special case if it's monochromatic
+                # Find nearest darker color (yet not the same one!)
+                bestcol = 0  # Index of the best color
+                nearest = 768  # Best match so far
+                for search in range(0, 256):
+                    ser, seg, seb = Mpalette[search]
+                    lightdiff = sum([ser - rr, seg - rg, seb - rb])
+                    if lightdiff >= 0:
+                        # The checked color is same or brighter; discard it
+                        continue
+                    # Calculate total difference
+                    lightdiff = sum([abs(ser - rr), abs(seg - rg), abs(seb - rb)])
+                    # Check the difference
+                    if lightdiff < nearest:
+                        # Check if the special case of monochromeness
+                        if mono and not (ser == seg == seb): continue
+                        # Found a better match
+                        nearest = lightdiff
+                        bestcol = search
+                # Fallback to the same reference color if no better candidates were found
+                if nearest == 768:  # Not found any better hits?
+                    break  # End the sequence then
+                collector.append(bestcol)
+            # Have collected the colors (from brightest downward) to 'collector'
+            # Deal with some special cases
+            # Luminescents, just keep original color
+            if keepluminescent and mapcol <= 23:
+                for light in applylightrange:
+                    wmap[mapcol][light] = mapcol
+                continue
+            # Ignored colors
+            if ignore2431 and mapcol >= 24 and mapcol <= 31:
+                continue
+            # None of the special cases, so streth the 'collector' over the wmap
+            # Calculate stepping
+            lightlen = len(applylightrange)  # Typically all 32
+            cstep = len(collector) / lightlen
+            nexcol = []  # Collector to be used for lightmap
+            # Stretch knowing the "light step"
+            for light in range(lightlen):
+                colloc = light * cstep
+                colloc = int(colloc)
+                nexcol.append(collector[colloc])
+            # Apply to wmap (colormap)
+            nexcol.reverse()  # Because the lightest was the starting one
+            for seq, tgt in enumerate(applylightrange):
+                wmap[mapcol][tgt] = nexcol[seq]
+
+    return wmap
 
 def get_nearest_color(rgb, priority=0, reverse=False):
     '''
@@ -692,7 +769,6 @@ def get_nearest_color(rgb, priority=0, reverse=False):
         # By now 'bestcolor' is filled with index of the best matching color
         return bestcolor
 
-
 def gradient32(rgb1, rgb2):
     '''
     Helper. Generate a smooth transition of length 32 where rgb1 is at postition 0 and rgb 2 at
@@ -702,7 +778,6 @@ def gradient32(rgb1, rgb2):
     step = [delta[c] / 31 for c in (0, 1, 2)]
     grad = [[rgb1[c] + light * step[c] for c in (0, 1, 2)] for light in range(32)]
     return grad
-
 
 def homogenize(cmprange, sacrifice):
     '''
@@ -751,7 +826,6 @@ def homogenize(cmprange, sacrifice):
             colrange = [get_nearest_color(c) for c in colrange]
             Mcolormap[col] = colrange
 
-
 def parse_ranges(input):
     '''Get a ranged-comma-delimited list of integers and split it to the corresponding
     numberic values. E.g. "0,4,5-8,9,11-13" leads to a list:
@@ -777,7 +851,6 @@ def parse_ranges(input):
     # Done, so just return the collector
     return items
 
-
 def parse_pairs(input):
     '''Get multiple pairs of integers joined by '>', and further separated by commas, and
     return as a dictionary of first leading to second'''
@@ -793,7 +866,6 @@ def parse_pairs(input):
         items[first] = last
     # Done, so just return the collector
     return items
-
 
 def get_flashlight_range(level=50):
     '''
@@ -814,7 +886,6 @@ def get_flashlight_range(level=50):
     # Normalize to 0-31
     lightlist = [round(v * 31) for v in lightlist]
     return lightlist
-
 
 def linear_homogenization(factor=5):
     '''
@@ -857,12 +928,10 @@ def linear_homogenization(factor=5):
     # All done, return the work colormap
     return wcmp
 
-
 # SUBLAYOUTS AND WINDOWS \2
 # ===============================================================================================
 
 # Modify color
-
 
 def modify_color():
     '''Change the RGB values of the currently selected colors.'''
@@ -970,7 +1039,6 @@ def modify_color():
 
 # Open PAL and/or CMP
 
-
 def open_files():
     global Mpalette
     global Mcolormap
@@ -1031,30 +1099,33 @@ def open_files():
 
 # Save file as
 
-
 def save_files_as():
-    oplayout = [[sg.In(key='ppal'), sg.FileSaveAs('Browse PAL',
-                                                  file_types=(('Palettes', '*.PAL'),),),
-                 sg.Checkbox('Exclude', key='cpal')],
-                [sg.In(key='pcmp'), sg.FileSaveAs('Browse CMP',
-                                                  file_types=(('Color maps', '*.CMP'),)),
-                 sg.Checkbox('Exclude', key='ccmp')],
-                [sg.T('\nFlashlight luminosity:')],
-                [sg.T('Weaker, shorter range'),
-                 sg.Slider(range=(0, 100), default_value=50, orientation='horizontal',
-                           size=(60, None), key='mix'),
-                 sg.T('Brighter, longer range')],
-                [sg.T('\nSet the slidebar to 0 to disable the flashlight entirely. Keep it at 50 '
-                      'for the flashlight like the one in the original missions.\n'), ],
-                [sg.Button('Cancel', size=(24, 1)), sg.Button('Save', size=(24, 1), focus=True)], ]
-    SaveAs = sg.Window('Save files as...', layout=oplayout,
-                       resizable=False,
-                       finalize=True,
-                       element_justification='center',
-                       font=(FONT_WINDOW, FONT_WINDOW_SIZE),
-                       modal=True,
-                       icon=ICONFILE,
-                       margins=(20, 20))
+    oplayout = [
+        [sg.In(key='ppal'), sg.FileSaveAs('Browse PAL',
+                                          file_types=(('Palettes', '*.PAL'),),),
+         sg.Checkbox('Exclude', key='cpal')],
+        [sg.In(key='pcmp'), sg.FileSaveAs('Browse CMP',
+                                          file_types=(('Color maps', '*.CMP'),)),
+         sg.Checkbox('Exclude', key='ccmp')],
+        [sg.T('\nFlashlight luminosity:')],
+        [sg.T('Weaker, shorter range'),
+         sg.Slider(range=(0, 100), default_value=50, orientation='horizontal',
+                   size=(60, None), key='mix'),
+         sg.T('Brighter, longer range')],
+        [sg.T('\nSet the slidebar to 0 to disable the flashlight entirely. Keep it at 50 '
+              'for the flashlight like the one in the original missions.\n'), ],
+        [sg.Button('Cancel', size=(24, 1)), sg.Button('Save', size=(24, 1), focus=True)],
+    ]
+    SaveAs = sg.Window(
+        'Save files as...', layout=oplayout,
+        resizable=False,
+        finalize=True,
+        element_justification='center',
+        font=(FONT_WINDOW, FONT_WINDOW_SIZE),
+        modal=True,
+        icon=ICONFILE,
+        margins=(20, 20)
+    )
     # Preload existing names (if any)
     if Mfiles[0] != 'Untitled':
         SaveAs['ppal'].update(value=Mfiles[0])
@@ -1100,7 +1171,6 @@ def save_files_as():
             break
 
 # Apply tint
-
 
 def apply_tint():
 
@@ -1207,7 +1277,6 @@ def apply_tint():
 
 # Palette checks
 
-
 def redundancy_consistency_check():
     duplicates, unused = palette_check()
     # Get assembling text
@@ -1262,7 +1331,6 @@ def redundancy_consistency_check():
                       size=(120, 20))
 
 # Palette adjustments - brightness, contrast, etc.
-
 
 def palette_adjustments():
     global Mpalette
@@ -1348,7 +1416,6 @@ def palette_adjustments():
 
 # Auto gradient between 2 palette colors
 
-
 def auto_gradient():
     global Mpalette
     WINlay = [[sg.T('Please enter the color indexes to bridge with a gradient, separated by comma:')],
@@ -1397,8 +1464,8 @@ def auto_gradient():
             Win.close()
             draw_all()
 
-
 # Import paletted bitmap
+
 def import_paletted_img():
     global Mpalette
 
@@ -1451,7 +1518,6 @@ def import_paletted_img():
             draw_all()
 
 # Merge current palette with another one
-
 
 def merge_palette():
     global Mpalette
@@ -1531,8 +1597,8 @@ def merge_palette():
             Win.close()
             draw_all()
 
-
 # Copy colors
+
 def copy_color():
     global Mpalette
 
@@ -1578,8 +1644,8 @@ def copy_color():
             Win.close()
             draw_all()
 
-
 # Auto-calculate color map
+
 def auto_calculate_map():
     global Mcolormap
 
@@ -1593,7 +1659,7 @@ def auto_calculate_map():
         [sg.T('\nCALCULATION PARAMETERS')],
         [sg.T('Projected light range:'), sg.In('0', size=(8, 1), key='projfrom'),
          sg.T('to'), sg.In('31', size=(8, 1), key='projto'), ],
-        [sg.Frame('Calculation method', element_justification='left', layout=[
+        [sg.Frame('Calculation algorithm', element_justification='left', layout=[
             [sg.Radio('Linear from full black to maximum brightness (Typical)', group_id=0, key='met1')],
             [sg.Radio('From selected color to maximum brightness (Distance haze effect)',
                       group_id=0, key='met2')],
@@ -1603,6 +1669,8 @@ def auto_calculate_map():
                       group_id=0, key='met4')],
             [sg.Radio('Hue shift (Ignores light ranges, light-change psychodelics)',
                       group_id=0, key='met5')],
+            [sg.Radio('Trickle & stretch (Trickled homogeneity stretched over available light range)',
+                      group_id=0, key='met6')],
         ])],
         [sg.Frame('Color choice', element_justification='left', layout=[
             [sg.Radio('Find the color nearest to the calculated one (RGB)', group_id=1, key='ch0')],
@@ -1682,7 +1750,8 @@ def auto_calculate_map():
             elif keys['met2']: method = 2
             elif keys['met3']: method = 3
             elif keys['met4']: method = 4
-            else: method = 5
+            elif keys['met5']: method = 5
+            else: method = 6
             # Determine choice priority
             if keys['ch0']: priority = 0
             elif keys['ch1']: priority = 1
@@ -1713,7 +1782,6 @@ def auto_calculate_map():
             draw_all()
 
 # Merge colormap (replace with)
-
 
 def merge_colormap():
     global Mcolormap
@@ -1783,12 +1851,16 @@ def merge_colormap():
             Win.close()
             draw_all()
 
-
 # Preview a look of a paletted bitmap with this palette and colormap
+
 def preview_pal_bmp():
-    WINlay = [[sg.T('Paletted .BMP filename:')],
+    WINlay = [[sg.T('A Dark Forces .BM or a paletted Windows .BMP file:')],
               [sg.In('', key='file', enable_events=True),
-               sg.FileBrowse('Browse', file_types=(('Bitmaps', '*.BMP'),),)],
+               sg.FileBrowse('Browse', file_types=(
+                   ('Windows and Dark Forces bitmaps', '*.BMP;*.BM'),
+                   ('Windows Bitmaps', '*.BMP'),
+                   ('Dark Forces Bitmaps', '*.BM'),
+               ),)],
               [sg.T('')],
               [sg.Graph(canvas_size=(256, 256), graph_bottom_left=(0, 256),
                         graph_top_right=(256, 0), key='prevgraph')],
@@ -1828,34 +1900,469 @@ def preview_pal_bmp():
         # OK/Apply
         if action == 'ltslider' or action == 'file':
             if not keys['file']: continue  # No file entered yet
-            # Load the image first
-            try:
-                img = pil.open(keys['file'])
-                px = img.load()
-                loffset = 128 - img.size[0] // 2
-                toffset = 128 - img.size[1] // 2
-            except BaseException:
-                continue
-            # Check if paletted indeed!
-            if not isinstance(px[0, 0], int):
-                popup('Not a valid paletted image!')
-                continue
-            # Iterate over "pixelation"
-            Win['prevgraph'].erase()
-            try:
-                reflight = round(int(keys['ltslider']))
-                for nx in range(img.size[0]):
-                    for ny in range(img.size[1]):
-                        if nx < 256 and ny < 256:
-                            # Copy pixels
-                            refcol = px[nx, ny]
-                            loccol = tempmap[refcol][reflight]
-                            Win['prevgraph'].draw_point((loffset + nx, toffset + ny), size=1,
-                                                        color=gethexcol(*Mpalette[loccol]))
-            except BaseException:
-                popup('Failed calculating lights range!')
-                continue
+            # Determine the type of the image and act accordingly
 
+            if keys['file'].lower().endswith('.bmp'):
+                # Windows BMP
+                # Load the image first
+                try:
+                    img = pil.open(keys['file'])
+                    px = img.load()
+                    loffset = 128 - img.size[0] // 2
+                    toffset = 128 - img.size[1] // 2
+                except BaseException:
+                    continue
+                # Check if paletted indeed!
+                if not isinstance(px[0, 0], int):
+                    popup('Not a valid paletted image!')
+                    continue
+                # Iterate over "pixelation"
+                Win['prevgraph'].erase()
+                try:
+                    reflight = round(int(keys['ltslider']))
+                    for nx in range(img.size[0]):
+                        for ny in range(img.size[1]):
+                            if nx < 256 and ny < 256:
+                                # Copy pixels
+                                refcol = px[nx, ny]
+                                loccol = tempmap[refcol][reflight]
+                                Win['prevgraph'].draw_point((loffset + nx, toffset + ny), size=1,
+                                                            color=gethexcol(*Mpalette[loccol]))
+                except BaseException:
+                    popup('Failed calculating lights range!')
+                    continue
+
+            if keys['file'].lower().endswith('.bm'):
+                # Dark Forces BM
+                # Load the image first
+                try:
+                    bmobject = bm.read(keys['file'])
+                    raw = list(bmobject.raw_data)
+                except BaseException:
+                    continue
+                # Try drawing
+                Win['prevgraph'].erase()
+                try:
+                    reflight = round(int(keys['ltslider']))
+                    # Determine image geometry
+                    bmx = bmobject.x
+                    bmy = bmobject.y
+                    loffset = 128 - bmx // 2
+                    toffset = 128 - bmy // 2
+                    # Draw pixel by pixel, knowing the raw begins with the bottommost row
+                    for nx in range(bmx):
+                        for ny in range(bmy):
+                            refpos = nx * bmy + ny
+                            refcol = raw[refpos]
+                            loccol = tempmap[refcol][reflight]
+                            Win['prevgraph'].draw_point((loffset + nx, toffset + bmy - ny - 1),
+                                                        size=1, color=gethexcol(*Mpalette[loccol]))
+                except BaseException:
+                    popup('Failed calculating lights range!')
+                    continue
+
+# Remap BM files
+
+def remap_bms(initial=None):  # Initial string can be given,e.g. 1>2,5>17,87>14,...
+    WINlay = [[sg.T('Remapping chart (▲From / To▼)')],
+              [sg.Graph(canvas_size=(513, 513), background_color='#000000', key='remap',
+                        graph_bottom_left=(0, 513), graph_top_right=(513, 0), enable_events=True)],
+              [sg.T('Click on a color box above to set its remapping\n')],
+              [sg.T('Input BM files folder'), sg.In('', key='inpdir'),
+               sg.FolderBrowse(target='inpdir')],
+              [sg.T('Output BM files folder'), sg.In('', key='outdir'),
+               sg.FolderBrowse(target='outdir')],
+              [sg.T('If the folders are identical, the existing BM files will be overwritten\n')],
+              [sg.Button('Export to a string ►', key='bex'), sg.In('', key='expimp'),
+               sg.Button('◄ Import from a string', key='bim'),],
+              [sg.T('')],
+              [sg.Button('    Cancel    ', key='cancel'),
+               sg.Button('    Remap    ', key='remapbms'),],]
+    Win = sg.Window('Remap BM files',
+                    layout=WINlay,
+                    resizable=False,
+                    finalize=True,
+                    element_justification='center',
+                    font=(FONT_WINDOW, FONT_WINDOW_SIZE),
+                    modal=True,
+                    icon=ICONFILE,
+                    margins=(20, 20))
+
+    remapper = dict()  # Holding all values as {source:target,source:target, ...}
+
+    if DEBUG_MODE:
+        remapper = {2: 4, 15: 117}
+        Win['outdir'].update('c:\\users\\otonribic\\desktop\\bm')
+
+    if initial:
+        remapper = dict()
+        pairs = initial.split(',')
+        pairs = [e.split('>') for e in pairs]
+        pairs = [(int(e[0]), int(e[1])) for e in pairs]
+        for src, dest in pairs: remapper[src] = dest
+
+    # Event loop
+    while True:
+        # Draw current remapping chart
+        Win['remap'].erase()
+        for grid in range(17):
+            Win['remap'].DrawLine((grid * 32, 0), (grid * 32, 513), color='#FFFFFF')
+            Win['remap'].DrawLine((0, grid * 32), (513, grid * 32), color='#FFFFFF')
+        for pc in range(256):
+            # Find swatch position
+            xp = (pc % 16) * 32
+            yp = (pc // 16) * 32
+            # Draw swatch for palette
+            Win['remap'].draw_rectangle((xp + 1, yp + 1), (xp + 32, yp + 16),
+                                        '#{0:02x}{1:02x}{2:02x}'.format(*Mpalette[pc]),
+                                        line_width=0)
+            fontcol = get_contrast_color(*Mpalette[pc])
+            Win['remap'].draw_text(str(pc), location=(xp + 16, yp + 7), color=fontcol,
+                                   text_location='center', font=[FONT_PALETTE, 8])
+            # Draw swatch for replacement (if any)
+            if pc in remapper.keys():
+                targ = remapper[pc]
+                Win['remap'].draw_rectangle((xp + 1, yp + 17), (xp + 32, yp + 31),
+                                            '#{0:02x}{1:02x}{2:02x}'.format(*Mpalette[targ]),
+                                            line_width=0)
+                fontcol = get_contrast_color(*Mpalette[targ])
+                Win['remap'].draw_text(str(targ), location=(xp + 16, yp + 23), color=fontcol,
+                                       text_location='center', font=[FONT_PALETTE, 8])
+
+        # Action processing
+        action, keys = Win.read()
+        if DEBUG_MODE: print(action, keys)
+
+        # Cancel/close
+        if action == sg.WIN_CLOSED or action == 'Exit':
+            break
+        if action == 'cancel':
+            Win.close()
+            break
+
+        # Set remap rule
+        if action == 'remap':
+            # Clicked on these coordinates
+            clx, cly = keys['remap']
+            clx = clx // 32
+            cly = cly // 32
+            cli = cly * 16 + clx
+            # Found it was 'cli' that was clicked
+            if DEBUG_MODE: print(cli)
+            # Request new value
+            new = sg.popup_get_text(
+                'Enter the color index to remap the color {0} to, or leave'
+                '\nblank to remove its current remapping:'.format(cli),
+                'Remap color')
+            if new is None:
+                continue  # Nothing done or cancelled
+            # Remove remap
+            if new == '':
+                if cli in remapper.keys():
+                    del remapper[cli]
+                continue
+            # Add remap
+            try:
+                new = int(new)
+            except:
+                popup('Not a valid value.')
+                continue
+            if new < 0 or new > 255:
+                popup('Please enter a number between 0 and 255.')
+                continue
+            if cli == new:
+                popup('Cannot remap a color to itself.')
+                continue
+            # New remap
+            remapper[cli] = new
+
+        # Export as string
+        if action == 'bex':
+            pairs = []  # Collector
+            lkeys = list(remapper.keys())
+            lkeys.sort()
+            for k in lkeys:
+                pair = '{0}>{1}'.format(k, remapper[k])
+                pairs.append(pair)
+            final = ','.join(pairs)
+            Win['expimp'].update(final)
+
+        # Import from string
+        if action == 'bim':
+            try:
+                pairs = keys['expimp'].split(',')
+                pairs = [e.split('>') for e in pairs]
+                pairs = [(int(e[0]), int(e[1])) for e in pairs]
+            except:
+                popup('Error in the import string. Should be s1>d1,s2>d2,... format.')
+                continue
+            # Now apply to remapper dict
+            remapper = dict()
+            for src, dest in pairs:
+                src = max(src, 0)
+                src = min(src, 255)
+                dest = max(dest, 0)
+                dest = min(dest, 255)
+                if src != dest: remapper[src] = dest
+
+        # Remap BM's
+        if action == 'remapbms':
+            if not remapper.keys():
+                popup('Please specify at least one remapping rule.')
+                continue
+            if not keys['inpdir'] or not keys['outdir']:
+                popup('Please specify input and output folders.')
+                continue
+            finput = os.path.normpath(keys['inpdir'])
+            foutput = os.path.normpath(keys['outdir'])
+            # Find eligible files
+            bms = glob.glob(os.path.join(finput, '*.bm'))
+            bms.sort()
+            if not bms:
+                popup('No eligible BM files found in the input folder.')
+                continue
+            # Go ahead
+            for file in bms:
+                if DEBUG_MODE: print(file)
+                try:
+                    object = bm.read(file)
+                    raw = list(object.raw_data)
+                    newraw = []  # Collector
+                    # Find and replace if needed
+                    for n in raw:
+                        if n in remapper.keys():
+                            n = remapper[n]
+                        newraw.append(n)
+                    object.raw_data = bytes(newraw)
+                    # Replaced; write back
+                    newfilename = os.path.split(file)
+                    newfull = os.path.join(foutput, newfilename[1])
+                    object.compression = bm.compression.NONE  # Optional to remove RLE compression
+                    bm.write(newfull, object)
+                except:
+                    popup('Failed on file ' + file + '.\nDoes the output folder exist?'
+                          ' Does this program and user have necessary write permissions?')
+                    continue
+            # Done all
+            popup('Done. {0} files processed.'.format(len(bms)))
+            Win.close()
+            break
+
+# Adapt BM files to a palette
+
+def adapt_bms_to_palette():
+    WINlay = [[sg.T('Source palette (the one the BM files are currently drawn in):')],
+              [sg.In('', key='sourcepalette'),
+               sg.FileBrowse(target='sourcepalette')],
+              [sg.T('')],
+              [sg.T('Destination palette:'),
+               sg.Radio('Currently edited one', group_id=1, key='current'),
+               sg.Radio('From a file', group_id=1, key='fromfile'),],
+              [sg.T('Destination palette (the one the BM files will be converted to):')],
+              [sg.In('', key='destpalette'),
+               sg.FileBrowse(target='destpalette')],
+              [sg.T('')],
+              [sg.Checkbox('Assign colors 0-23 and 32-255 separately', key='sepf')],
+              [sg.T('')],
+              [sg.Button('Hints'), sg.Button('Cancel'),
+               sg.Button('Calculate and adapt', key='go')],]
+
+    Win = sg.Window('Adapt BM file(s) to another palette',
+                    layout=WINlay,
+                    resizable=False,
+                    finalize=True,
+                    element_justification='center',
+                    font=(FONT_WINDOW, FONT_WINDOW_SIZE),
+                    modal=True,
+                    icon=ICONFILE,
+                    margins=(20, 20))
+    Win['fromfile'].update(value=True)
+    Win['sepf'].update(True)
+    if DEBUG_MODE:
+        Win['sourcepalette'].update('palettes\\JABSHIP.PAL')
+        Win['destpalette'].update('palettes\\SECBASE.PAL')
+
+    # Event loop
+    while True:
+        action, keys = Win.read()
+        if DEBUG_MODE: print(action, keys)
+
+        # Cancel/close
+        if action == sg.WIN_CLOSED or action == 'Exit':
+            break
+        if action == 'Cancel':
+            Win.close()
+            break
+
+        # Hints
+        if action == 'Hints':
+            popup(cmconst.ADAPTPALETTE)
+
+        # Convert
+        if action == 'go':
+            # Checks
+            if not keys['sourcepalette']:
+                popup('Please specify the source palette.')
+                continue
+            if not keys['destpalette'] and keys['fromfile']:
+                popup('Please specify the destination palette.')
+                continue
+            # Open input and output palette
+            try:
+                spal = load_palette(keys['sourcepalette'])
+            except:
+                popup('Corrupt or inexistent source palette!')
+                continue
+            if keys['fromfile']:
+                try:
+                    dpal = load_palette(keys['destpalette'])
+                except:
+                    popup('Corrupt or inexistent destination palette!')
+            else:
+                dpal = Mpalette  # Using the main one
+            # Loaded both palettes to spal and dpal by now
+            # Create mapping dictionary to be used later
+            mapping = dict()
+            # Iterate per color and have inner logic
+            for color in range(256):
+                if DEBUG_MODE: print('Checking color', color)
+                # Check if 24-31, those are ignored
+                if color >= 24 and color <= 31:
+                    continue
+                # Check if already the same (spal[color]==dpal[color])
+                if spal[color] == dpal[color]:
+                    continue
+                # Not the same, we need to find the best alternative
+                rr, rg, rb = spal[color]
+                # Determine eligible replacements list
+                if not keys['sepf']:
+                    eligibles = list(range(0, 24)) + list(range(32, 256))
+                else:
+                    if color <= 23:
+                        eligibles = list(range(0, 24))
+                    if color >= 32:
+                        eligibles = list(range(32, 256))
+                # Now iterate through eligibles and see which one matches the best
+                best = 768
+                for checked in eligibles:
+                    tr, tg, tb = dpal[checked]
+                    # Delta in RGB between two colors
+                    delta = abs(tr - rr) + abs(tg - rg) + abs(tb - rb)
+                    if delta < best:
+                        # Check if best one found
+                        bestcolor = checked
+                        best = delta
+                        if best == 0: break
+                # Map in the mapper
+                mapping[color] = bestcolor
+            # Assembled the mapping for the remapper feature
+            # Now assemble the string
+            bmstr = []  # Collector
+            for srccol in mapping.keys():
+                if mapping[srccol] == srccol: continue  # No change
+                bmstr.append('{0}>{1}'.format(srccol, mapping[srccol]))
+            bmstr = ','.join(bmstr)
+            # Done and proceed to the BM remapper
+            Win.close()
+            remap_bms(bmstr)
+            break
+
+# Richards segmented distribution
+
+def richards_segment():
+    global Mcolormap
+    global Mpalette
+    defseg = '32>63, 64>79, 80>95, 96>111, 112>127, 128>143, 144>151, 152>159, ' +\
+        '160>167, 168>175, 176>191, 192>207, 208>239, 240>254'
+    WINlay = [[sg.T('Segment(s) to calculate, in start>stop format, separated by comma, '
+                    'e.g. 32>79, 112>127')],
+              [sg.In(defseg, key='segments', size=(80, 1))],
+              [sg.Button('Auto-detect segments', key='autodetect'),
+               sg.Checkbox('Ignore colors 0-31 during auto-detection', key='ignore031')],
+              [sg.T('\nFalloff linearity (percent):'),
+               sg.Slider(range=(50, 100), orientation='horizontal', size=(50, 20),
+                         key='linearity', default_value=80)],
+              [sg.T('\nThis method uses the mapping of the first color in a segment and '
+                    'spreads it uniformly across the remaining colors.\n')],
+              [sg.Button('Cancel'), sg.Button('Distribute')], ]
+    Win = sg.Window('Richards segmented distribution',
+                    layout=WINlay,
+                    resizable=False,
+                    finalize=True,
+                    element_justification='center',
+                    font=(FONT_WINDOW, FONT_WINDOW_SIZE),
+                    modal=True,
+                    icon=ICONFILE,
+                    margins=(20, 20))
+    Win['ignore031'].update(value=True)
+
+    # Event loop
+    while True:
+        action, keys = Win.read()
+        if DEBUG_MODE: print(action, keys)
+
+        # Cancel/close
+        if action == sg.WIN_CLOSED or action == 'Exit':
+            break
+        if action == 'Cancel':
+            Win.close()
+            break
+
+        # Autodetect ranges
+        if action == 'autodetect':
+            # Find all palette colors with brightness higher than its previous neighbors
+            brighter = [e for e in range(1, 256) if max(Mpalette[e]) > max(Mpalette[e - 1])]
+            # Eliminate under 32 if needed and add starter
+            if keys['ignore031']:
+                brighter = [32] + [e for e in brighter if e >= 32]
+            else:
+                brighter = [0] + brighter
+            # Add end for simpler processing
+            brighter.append(256)
+            # Assemble the string
+            pairs = []  # Collector
+            for i in range(len(brighter) - 1):
+                if brighter[i] == brighter[i + 1] - 1: continue  # Eliminate zero-length
+                pair = str(brighter[i]) + '>' + str(brighter[i + 1] - 1)
+                pairs.append(pair)
+            pairs = ', '.join(pairs)
+            Win['segments'].update(value=pairs)
+
+        # Distribute
+        if action == 'Distribute':
+            # Split to segments
+            if not keys['segments']:
+                popup('Please enter at least one palette segment!')
+                continue
+            try:
+                segs = keys['segments']
+                segs = segs.split(',')
+                segs = [e.strip(' ') for e in segs]
+                segs = [e.split('>') for e in segs]
+                segs = [(int(e[0]), int(e[1])) for e in segs]
+            except:
+                popup('Please provide a valid segment definition!')
+                continue
+            # Now that segs is filled with [(start1,stop1),(start2,stop2),...], process
+            save_undo()
+            for segstart, segstop in segs:
+                reference = Mcolormap[segstart]  # Colormap to refer to
+                replen = segstop - segstart
+                if DEBUG_MODE: print('Segment:', segstart, segstop, replen)
+                # Over the length, the light reference progresses from 31 to 0
+                step = 31 / replen
+                for column in range(replen):
+                    # Calculate iterations of lightness levels
+                    ceiling = 31 - (column + 1) * (step * (keys['linearity'] / 100))
+                    colstep = ceiling / 32
+                    for light in range(32):
+                        # Determine where in the list to look
+                        realposition = abs(light * colstep)
+                        refposition = round(realposition)  # In the list
+                        Mcolormap[segstart + column + 1][light] = Mcolormap[segstart][refposition]
+            # Done all, return to main window
+            Win.close()
+            draw_all()
 
 # Solve uneven segments of color maps
 def solve_unevennesses():
@@ -1922,7 +2429,6 @@ def solve_unevennesses():
             draw_all()
 
 # Sort colors in palette
-
 
 def sort_palette():
     global Mpalette
@@ -2007,7 +2513,6 @@ def sort_palette():
             Win.close()
             draw_all()
 
-
 # Show scatter plot of palette coverage
 def coverage_scatter():
     WINlay = [[sg.T('Hue vs Brightness:')],
@@ -2065,7 +2570,6 @@ def coverage_scatter():
             break
 
 # Mass replace colors in the colormap according to manual rules
-
 
 def mass_replace_colormap():
     global Mcolormap
@@ -2139,13 +2643,11 @@ def mass_replace_colormap():
 
 # Load CMP from approximated image
 
-
 def load_cmp_from_image():
     global Mcolormap
 
     WINlay = [[sg.T('Pick an image to load and convert to a color map:')],
               [sg.In(key='pcmp'), sg.FileBrowse('Browse', file_types=(('Images', '*.*'),)), ],
-
               [sg.T('(Images that do not have dimensions 256x32 px will be rescaled accordingly.)')],
               [sg.T('')],
               [sg.Button('Cancel', size=(15, 1)), sg.Button('Load', size=(15, 1), focus=True)],
@@ -2200,7 +2702,6 @@ def load_cmp_from_image():
 
 # Export CMP to image
 
-
 def export_cmp_to_image():
 
     WINlay = [[sg.T('File to export the color map to:')],
@@ -2242,13 +2743,309 @@ def export_cmp_to_image():
             try:
                 img.save(keys['expc'])
             except BaseException:
-                popup('Please enter a correct export filename and make sure you have got'
+                popup('Please enter a correct export filename and make sure you have got '
                       'permissions to save to that location.')
             Win.close()
             break
 
-# Progressive saturation, i.e. one depending on lightness
+# Export palette to a GIMP palette file
 
+def export_to_gimp():
+    WINlay = [[sg.T('Output file:'),
+               sg.In('', size=(60, 1), key='outf'),
+               sg.FileSaveAs(file_types=(('GIMP Palettes', '*.gpl'),),),],
+              [sg.T('')],
+              [sg.Button('Cancel'),
+              sg.Button('Export'),
+               ]]
+    Win = sg.Window('Export to a GIMP palette',
+                    layout=WINlay,
+                    resizable=False,
+                    finalize=True,
+                    element_justification='center',
+                    font=(FONT_WINDOW, FONT_WINDOW_SIZE),
+                    modal=True,
+                    icon=ICONFILE,
+                    margins=(20, 20),
+                    )
+    # Set default GPL name
+    lname = Mfiles[0]
+    if lname.lower().endswith('.pal'):
+        lname = lname[:-4]
+    lname += '.gpl'
+    Win['outf'].update(lname)
+
+    # Event loop
+    while True:
+        action, keys = Win.read()
+        if DEBUG_MODE: print(action, keys)
+
+        # Cancel/close
+        if action == sg.WIN_CLOSED or action == 'Exit':
+            break
+        if action == 'Cancel':
+            Win.close()
+            break
+
+        # Export
+        if action == 'Export':
+            if not keys['outf']:
+                popup('Enter the correct output file name.')
+                continue
+            # Assemble
+            gpl = ['GIMP Palette']  # String collector
+            for color in range(256):
+                # Write lines
+                sl = '{0} {1} {2} Color{3}'.format(
+                    Mpalette[color][0],
+                    Mpalette[color][1],
+                    Mpalette[color][2],
+                    color)
+                gpl.append(sl)
+            # Assemble
+            gpl = '\n'.join(gpl)
+            try:
+                outf = open(keys['outf'], 'w')
+                outf.write(gpl)
+                outf.close()
+            except:
+                popup('Failed writing file. Permissions and filename OK?')
+                continue
+            Win.close()
+            break
+
+# Export palette to an Adobe ASE
+
+def export_to_ase():
+    WINlay = [[sg.T('Output file:'),
+               sg.In('', size=(60, 1), key='outf'),
+               sg.FileSaveAs(file_types=(('ASE Palettes', '*.ase'),),),],
+              [sg.T('')],
+              [sg.Button('Cancel'),
+              sg.Button('Export'),
+               ]]
+    Win = sg.Window('Export to an ASE palette',
+                    layout=WINlay,
+                    resizable=False,
+                    finalize=True,
+                    element_justification='center',
+                    font=(FONT_WINDOW, FONT_WINDOW_SIZE),
+                    modal=True,
+                    icon=ICONFILE,
+                    margins=(20, 20),
+                    )
+    # Set default GPL name
+    lname = Mfiles[0]
+    if lname.lower().endswith('.pal'):
+        lname = lname[:-4]
+    lname += '.ase'
+    Win['outf'].update(lname)
+
+    # Event loop
+    while True:
+        action, keys = Win.read()
+        if DEBUG_MODE: print(action, keys)
+
+        # Cancel/close
+        if action == sg.WIN_CLOSED or action == 'Exit':
+            break
+        if action == 'Cancel':
+            Win.close()
+            break
+
+        # Export
+        if action == 'Export':
+            if not keys['outf']:
+                popup('Enter the correct output file name.')
+                continue
+            # Assemble
+            colorlist = []  # Collector
+            for n in range(256):
+                colorlist.append(('Color{0}'.format(n), *Mpalette[n]))
+            try:
+                ase.write_ase_file(keys['outf'], 'Chromas Mines', colorlist)
+            except:
+                popup('Failed writing file. Permissions and filename OK?')
+                continue
+            Win.close()
+            break
+
+# Copy light level in a colormap
+
+def copy_light_level():
+    global Mcolormap
+    WINlay = [[sg.T('Source light level (0-31):'), sg.In('31', key='csrc', size=(8, 1))],
+              [sg.T('Destination light level (0-31:'), sg.In('0', key='cdest', size=(8, 1))],
+              [sg.T('')],
+              [sg.Button('Cancel', size=(15, 1)), sg.Button('Copy', size=(15, 1), focus=True)],
+              ]
+    Win = sg.Window('Copy light level in a colormap',
+                    layout=WINlay,
+                    resizable=False,
+                    finalize=True,
+                    element_justification='center',
+                    font=(FONT_WINDOW, FONT_WINDOW_SIZE),
+                    modal=True,
+                    icon=ICONFILE,
+                    margins=(20, 20),
+                    )
+
+    # Event loop
+    while True:
+        action, keys = Win.read()
+        if DEBUG_MODE: print(action, keys)
+
+        # Cancel/close
+        if action == sg.WIN_CLOSED or action == 'Exit':
+            break
+        if action == 'Cancel':
+            Win.close()
+            break
+
+        # OK/apply
+        if action == 'Copy':
+            try:
+                src = int(keys['csrc'])
+                dest = int(keys['cdest'])
+                if src > 31 or dest > 31 or src < 0 or dest < 0: raise OverflowError
+            except:
+                popup('Unable to parse the light levels')
+                continue
+            # Copy now
+            save_undo()
+            for mcol in range(256):
+                Mcolormap[mcol][dest] = Mcolormap[mcol][src]
+            Win.close()
+            draw_all()
+            break
+
+# Set range in a color lightmap
+
+def set_map_range():
+    global Mcolormap
+    WINlay = [[sg.T('Color range (0-255):'), sg.In('0', key='cf', size=(8, 1)),
+               sg.T('to'), sg.In('255', key='ct', size=(8, 1)),],
+              [sg.T('Light range (0-31):'), sg.In('0', key='lf', size=(8, 1)),
+              sg.T('to'), sg.In('31', key='lt', size=(8, 1)),],
+              [sg.T('Color index to set the range to:'), sg.In('0', key='targcol', size=(8, 1))],
+              [sg.T(''),],
+              [sg.Button('Cancel', size=(15, 1)), sg.Button('Set', size=(15, 1), focus=True)],
+              ]
+    Win = sg.Window('Set color map range',
+                    layout=WINlay,
+                    resizable=False,
+                    finalize=True,
+                    element_justification='center',
+                    font=(FONT_WINDOW, FONT_WINDOW_SIZE),
+                    modal=True,
+                    icon=ICONFILE,
+                    margins=(20, 20),
+                    )
+
+    # Event loop
+    while True:
+        action, keys = Win.read()
+        if DEBUG_MODE: print(action, keys)
+
+        # Cancel/close
+        if action == sg.WIN_CLOSED or action == 'Exit':
+            break
+        if action == 'Cancel':
+            Win.close()
+            break
+ # OK/apply
+        if action == 'Set':
+            save_undo()
+            try:
+                # Execute change
+                for clr in range(int(keys['cf']), int(keys['ct']) + 1):
+                    for lt in range(int(keys['lf']), int(keys['lt']) + 1):
+                        Mcolormap[clr][lt] = int(keys['targcol'])
+            except:
+                popup('Unable to set')
+                continue
+            # Finish
+            Win.close()
+            draw_all()
+            break
+
+# Project ranges
+
+def project_ranges():
+    global Mcolormap
+
+    WINlay = [[sg.T('Color range:')],
+              [sg.T('From'), sg.In('0', key='cfrom', size=(5, 1)),
+               sg.T('to'), sg.In('255', key='cto', size=(5, 1))],
+              [sg.T('\nSource lightness range:')],
+              [sg.T('From'), sg.In('0', key='sfrom', size=(5, 1)),
+               sg.T('to'), sg.In('31', key='sto', size=(5, 1))],
+              [sg.T('\nDestination lightness range:')],
+              [sg.T('From'), sg.In('0', key='dfrom', size=(5, 1)),
+               sg.T('to'), sg.In('15', key='dto', size=(5, 1))],
+              [sg.T('')],
+              [sg.Button('Cancel'), sg.Button('Project')]]
+
+    Win = sg.Window('Project map ranges',
+                    layout=WINlay,
+                    resizable=False,
+                    finalize=True,
+                    element_justification='center',
+                    font=(FONT_WINDOW, FONT_WINDOW_SIZE),
+                    modal=True,
+                    icon=ICONFILE,
+                    margins=(20, 20))
+
+    # Event loop
+    while True:
+        action, keys = Win.read()
+        if DEBUG_MODE: print(action, keys)
+
+        # Cancel/close
+        if action == sg.WIN_CLOSED or action == 'Exit':
+            break
+        if action == 'Cancel':
+            Win.close()
+            break
+
+        # Project
+        # Create reference first
+        refmap = copy.deepcopy(Mcolormap)
+        # Calculate differences and steppers
+        # Get values
+        try:
+            cfrom = int(keys['cfrom'])
+            cto = int(keys['cto'])
+            sfrom = int(keys['sfrom'])
+            sto = int(keys['sto'])
+            dfrom = int(keys['dfrom'])
+            dto = int(keys['dto'])
+        except:
+            popup('Incorrect values in one or more fields!')
+            continue
+        srange = sto - sfrom
+        drange = dto - dfrom
+        # Iterate over color (then inside over light ranges)
+        for color in range(cfrom, cto + 1):
+            for light in range(dfrom, dto + 1):
+                prog = light - dfrom
+                prog /= drange
+                prog *= srange
+                prog += sfrom
+                prog = round(prog)
+                # Assign to reference map
+                try:
+                    refmap[color][light] = Mcolormap[color][prog]
+                except:
+                    popup('Incorrect values in one or more fields!')
+        # Done, apply changes in general
+        save_undo()
+        Mcolormap = refmap
+        Win.close()
+        draw_all()
+        break
+
+# Progressive saturation, i.e. one depending on lightness
 
 def prog_saturation():
     global Mpalette
@@ -2262,8 +3059,8 @@ def prog_saturation():
                sg.Slider(range=(0, 100), orientation='horizontal', size=(50, 20),
                          key='slider', default_value=50)],
               [sg.T('')],
-              [sg.Button('Cancel', size=(15, 1)), sg.Button('Replace', size=(15, 1), focus=True)],
-              ]
+              [sg.Button('Cancel', size=(15, 1)),
+               sg.Button('Replace', size=(15, 1), focus=True)], ]
     Win = sg.Window('Saturation depending on brightness',
                     layout=WINlay,
                     resizable=False,
@@ -2318,8 +3115,236 @@ def prog_saturation():
             Win.close()
             draw_all()
 
-# Change theme
+# Construct palette
 
+def construct_pal():
+    global Mpalette
+    WINlay = [[sg.T('Number of different hues to construct:')],
+              [sg.Slider(range=(3, 30), orientation='horizontal', size=(75, 20), key='hues',
+                         default_value=12)],
+              [sg.T('')],
+              [sg.T('Range to construct: From'),
+               sg.In('32', key='cfrom', size=(10, 1)), sg.T('to'),
+               sg.In('255', key='cto', size=(10, 1))],
+              [sg.T('')],
+              [sg.Button('Cancel', key='cancel'), sg.Button('Construct')],
+              ]
+
+    Win = sg.Window('Construct a palette',
+                    layout=WINlay,
+                    resizable=False,
+                    finalize=True,
+                    element_justification='center',
+                    font=(FONT_WINDOW, FONT_WINDOW_SIZE),
+                    modal=True,
+                    icon=ICONFILE,
+                    margins=(20, 20))
+
+    while True:
+        action, keys = Win.read()
+        if DEBUG_MODE: print(action, keys)
+
+        # Cancel/close
+        if action == sg.WIN_CLOSED or action == 'Exit':
+            break
+        if action == 'cancel':
+            Win.close()
+            break
+
+        # Construct
+        if action == 'Construct':
+            # Calculate ranges
+            try:
+                hues = round(keys['hues'])
+                cfrom = int(keys['cfrom'])
+                cto = int(keys['cto'])
+                clen = cto - cfrom + 1
+                assert clen > 0 and clen < 256
+            except:
+                popup('Wrong from/to values!')
+                continue
+            # Find color roots
+            hstep = 1 / hues
+            roots = []  # Collector
+            # Create roots
+            for s in range(hues):
+                angle = s * hstep
+                lcol = colorsys.hls_to_rgb(angle, 128, -1)
+                lcol = [round(e) for e in list(lcol)]
+                roots.append(lcol)  # Add to the list
+            # Now the list has all root colors
+            palstep = clen / hues  # How many colors on average per hue root
+            positions = []  # Collector
+            for id in range(len(roots)):
+                spos = round(cfrom + id * palstep)  # Where the range will start
+                positions.append(spos)
+            positions.append(cto + 1)  # To have the 'end' of the ranges
+            save_undo()
+            # Add these ranges
+            for id in range(len(roots)):
+                root = roots[id]
+                coverage = positions[id], positions[id + 1]
+                if DEBUG_MODE: print(root, coverage)
+                # Spread darkening 'root' color RGB over coverage[0]->coverage[1]
+                vlen = coverage[1] - coverage[0]
+                vstep = 1 / vlen
+                for color in range(coverage[0], coverage[1]):
+                    stepper = color - coverage[0]
+                    cstep = 1 - stepper * vstep  # Multiplier
+                    lr = [round(e * cstep) for e in root]
+                    # Assign to palette
+                    Mpalette[color] = lr
+            # Done with all
+            Win.close()
+            draw_all()
+
+# Auto-reduce palette
+
+def auto_reduce():
+    global Mpalette
+    global Mcolormap
+    WINlay = [[sg.T('This feature automatically finds the most similar pairs of colors in the'
+                    ' palette and merges them, freeing some slots.\nAfter applying the changes'
+                    ' to the palette (whether auto-suggested or manually written ones) '
+                    'you will\nbe led to the remapping tool in order to apply the same changes'
+                    ' to your BM files if you want.\n\n'
+                    'How many similar colors to find and reduce:'),],
+              [sg.Slider(range=(1, 150), orientation='horizontal', size=(75, 20), key='nocol',
+                         default_value=32)],
+              [sg.Checkbox('Do not remap colors 0-23', key='ignore023'),
+               sg.Checkbox('Ignore colors 24-31', key='ignore2431')],
+              [sg.T('\nPlanned changes list')],
+              [sg.Multiline('', size=(70, 15), key='changes')],
+              [sg.T('')],
+              [sg.T('RGB for the newly "freed" colors:'),
+               sg.In('255,0,96', key='newrgb', size=(12, 1)),
+               sg.Checkbox('Remap BM files accordingly after applying changes', key='conremap')],
+              [sg.T('')],
+              [sg.Button(' Hints ', key='help'),
+               sg.Button(' Cancel ', key='cancel'),
+               sg.Button(' Auto-calculate and propose changes ', key='calc'),
+               sg.Button(' Accept, apply changes and remap ', key='exec')],
+              ]
+    Win = sg.Window('Auto-reduce colors',
+                    layout=WINlay,
+                    resizable=False,
+                    finalize=True,
+                    element_justification='center',
+                    font=(FONT_WINDOW, FONT_WINDOW_SIZE),
+                    modal=True,
+                    icon=ICONFILE,
+                    margins=(20, 20))
+    Win['ignore023'].update(True)
+    Win['ignore2431'].update(True)
+    Win['conremap'].update(True)
+
+    while True:
+        action, keys = Win.read()
+        if DEBUG_MODE: print(action, keys)
+
+        # Cancel/close
+        if action == sg.WIN_CLOSED or action == 'Exit':
+            break
+        if action == 'cancel':
+            Win.close()
+            break
+
+        # Info
+        if action == 'help':
+            popup(cmconst.REMAPHINTS)
+
+        # Calculate & propose
+        if action == 'calc':
+            # First build a table of distances between colors
+            distances = []  # Collector
+            for cx in range(256):
+                for cy in range(cx + 1, 256):
+                    if keys['ignore2431']:
+                        if (cx >= 24 and cx <= 31) or (cy >= 24 and cy <= 31): continue
+                    if keys['ignore023']:
+                        if cy <= 23: continue
+                    rx, gx, bx = Mpalette[cx]
+                    ry, gy, by = Mpalette[cy]
+                    # Find difference
+                    delta = abs(rx - ry) + abs(gx - gy) + abs(bx - by)
+                    # Append to collector
+                    distances.append((delta, cx, cy))
+            # Find best hits
+            distances.sort()
+            proposal = []  # Suggestions string collector
+            # Keep suggesting until sufficient number found (or delta list depleted)
+            while len(proposal) < round(keys['nocol']) and distances:
+                ldelta, lto, lfrom = distances[0]
+                proposal.append('{0}>{1} # RGB difference: {2}'.format(lfrom, lto, ldelta))
+                # Remove lfrom color from distances
+                distances = [e for e in distances if e[1] != lfrom and e[2] != lfrom]
+            # Propose all changes in the suggestions window
+            Win['changes'].update('\n'.join(proposal))
+
+        # Apply changes and shift proposals
+        if action == 'exec':
+            if not keys['changes']:
+                popup('Please write at least one change rule (e.g. 173>5) in the field!')
+                continue
+            # Parse commands
+            try:
+                rows = keys['changes'].split('\n')
+                rows = [e.partition('#')[0] for e in rows]
+                rows = [e.partition('>') for e in rows]
+                rows = [(int(e[0]), int(e[2])) for e in rows]
+                # Sort by source descending so that there are no "backpedaling" issues
+                rows.sort(key=lambda e: e[0], reverse=True)
+                if DEBUG_MODE: print(rows)
+            except:
+                popup('Error in the change rules!')
+                continue
+            # Prepare a remapping plan template to be used later for BM's
+            remapplan = dict()
+            for n in range(256):
+                remapplan[n] = n  # Originally each color maps to itself
+            # Get the new default color for freed slots
+            try:
+                newdefault = keys['newrgb'].split(',')
+                newdefault = [int(e) for e in newdefault]
+                assert len(newdefault) == 3
+            except:
+                popup('Newly freed color value is wrong!')
+            save_undo()
+            # Handle proposals in a sequence
+            for src, dest in rows:
+                if DEBUG_MODE: print('Substitute:', src, '>', dest)
+                # Four steps: palette shift left, palette add 255, map shift left, map src>dest
+                # Shift palette left
+                for cln in range(src, 255):
+                    Mpalette[cln] = Mpalette[cln + 1]
+                    remapplan[cln + 1] -= 1
+                # Add color 255 to given value
+                Mpalette[255] = newdefault
+                # Shift map
+                for cln in range(src, 255):
+                    Mcolormap[cln] = Mcolormap[cln + 1]
+                # Remap the map source>destination
+                for cln in range(256):
+                    # Remap the actual color
+                    Mcolormap[cln] = [(dest if e == src else e) for e in Mcolormap[cln]]
+                    # Shift all subsequent ones as they moved in the palette, too
+                    Mcolormap[cln] = [(e - 1 if e > src else e) for e in Mcolormap[cln]]
+                # Set the new color's map to itself
+                Mcolormap[255] = [255] * 32
+            # This auto-reduce part is complete
+            Win.close()
+            draw_all()
+            # If requested, forward to BM remapping
+            if keys['conremap']:
+                # Prepare the input string
+                remapstr = []  # Collector
+                for cln in remapplan.keys():
+                    if not remapplan[cln] == cln:
+                        remapstr.append('{0}>{1}'.format(cln, remapplan[cln]))
+                remapstr = ','.join(remapstr)
+                remap_bms(remapstr)
+
+# Change theme
 
 def change_theme():
     # Prefill values
@@ -2362,8 +3387,23 @@ def change_theme():
             Main.close()
             init_Main_window()
 
+# Increment/decrement theme
+
+def increment_theme(value=0):
+    global COLORTHEME
+    # Find and locate current
+    allts = list(cmconst.COLORTHEMES.keys())
+    ci = allts.index(COLORTHEME)
+    # Apply displacement
+    ci += value
+    if ci < 0: ci = 0
+    if ci >= len(allts): ci = len(allts) - 1
+    COLORTHEME = allts[ci]
+    Main.close()
+    init_Main_window()
 
 # Homogenize map
+
 def lin_homogenize():
     global Mcolormap
 
@@ -2410,7 +3450,6 @@ def lin_homogenize():
             draw_all()
 
 # Unbalance the map colors acccording to a given curve
-
 
 def unbalance():
     global Mcolormap
@@ -2493,7 +3532,6 @@ def unbalance():
 
 # Make selected color luminous in the color map
 
-
 def make_sel_luminous():
     global Mcolormap
     save_undo()
@@ -2502,7 +3540,6 @@ def make_sel_luminous():
     draw_all()
 
 # Export the palette to a paletted image 256x1 px
-
 
 def export_paletted_img():
 
@@ -2552,7 +3589,6 @@ def export_paletted_img():
             # Cleanup
             Win.close()
             draw_all()
-
 
 #########################
 # GENERAL LAYOUT START \3
@@ -2623,12 +3659,12 @@ while True:
         save_files_as()
 
     # Menu: Quit
-    if action == 'Quit' or action == 'q':
+    if action == 'Quit (Q)' or action == 'q':
         Main.close()  # To properly clean behind itself
         break
 
     # Menu: Undo
-    if action == 'Undo (U)' or action == 'u':
+    if action == 'Undo (U)' or action == 'u' or action == 'Undo':
         undo()
 
     # Menu: Toggle swatch borders
@@ -2663,12 +3699,12 @@ while True:
         Main.close()
         init_Main_window()
     # Resize hotkeys
-    if action == ']':
+    if action == ']' or action == 'MouseWheel:Up':
         SCALE = round(SCALE * 1.2)
         if SCALE > 96: SCALE = 96
         Main.close()
         init_Main_window()
-    if action == '[':
+    if action == '[' or action == 'MouseWheel:Down':
         SCALE = round(SCALE / 1.2)
         if SCALE < 24: SCALE = 24
         Main.close()
@@ -2677,6 +3713,14 @@ while True:
     # Menu: Window theme
     if action == 'Window theme...':
         change_theme()
+
+    # Menu: Increment theme
+    if action == '>':
+        increment_theme(1)
+
+    # Menu: Increment theme
+    if action == '<':
+        increment_theme(-1)
 
     # Menu: Toggle selected color
     if action == 'Toggle selected color (\\)' or action == '\\':
@@ -2707,13 +3751,29 @@ while True:
     if action == 'Progressive saturation...':
         prog_saturation()
 
+    # Menu: Auto-reduce palette
+    if action == 'Auto-reduce colors...':
+        auto_reduce()
+
+    # Menu: Construct palette
+    if action == 'Construct palette...':
+        construct_pal()
+
     # Menu: Import from paletted image
     if action == 'Import from paletted image...':
         import_paletted_img()
 
-        # Menu: Import from paletted image
+    # Menu: Import from paletted image
     if action == 'Export to paletted image...':
         export_paletted_img()
+
+    # Menu: Export a palette to GIMP file
+    if action == 'Export to GIMP palette...':
+        export_to_gimp()
+
+    # Menu: Export a palette to Adobe ASE file
+    if action == 'Export to Adobe Swatch palette...':
+        export_to_ase()
 
     # Menu: Merge with another palette
     if action == 'Merge with... (M)' or action == 'm':
@@ -2751,6 +3811,18 @@ while True:
     if action == 'Load from image...':
         load_cmp_from_image()
 
+    # Menu: Copy light level in a map
+    if action == 'Copy light level...':
+        copy_light_level()
+
+    # Menu: Set color map range
+    if action == 'Set range...':
+        set_map_range()
+
+    # Menu: Project ranges
+    if action == 'Project ranges...':
+        project_ranges()
+
     # Menu: Make selected color luminous
     if action == 'Make selected color luminous (L)' or action == 'l':
         make_sel_luminous()
@@ -2759,9 +3831,9 @@ while True:
     if action == 'Mass replace colors... (F8)' or action.startswith('F8:'):
         mass_replace_colormap()
 
-    # Menu: Preview a paletted BMP
-    if action == 'Preview bitmap... (F3)' or action.startswith('F3:'):
-        preview_pal_bmp()
+    # Menu: Richards segmented distribution
+    if action == 'Richards distribution... (R)' or action == 'r':
+        richards_segment()
 
     # Menu: Solve unevennesses
     if action == 'Solve unevennesses...':
@@ -2777,9 +3849,21 @@ while True:
         Mcolormap = copy.deepcopy(cmconst.ORIGS[levindex][3])
         draw_all()
 
+    # Menu: Preview a paletted BMP or BM
+    if action == 'Preview BM or BMP... (F3)' or action.startswith('F3:'):
+        preview_pal_bmp()
+
+    # Menu: Remap BM's
+    if action == 'Remap BM files...':
+        remap_bms()
+
+    # Menu: Adapt to other palette
+    if action == 'Adapt to a different palette...':
+        adapt_bms_to_palette()
+
     # Menu: Tutorial
     if action == 'Tutorial...':
-        webbrowser.open('https://www.youtube.com/watch?v=PYlLuws_JQU')
+        webbrowser.open('https://www.youtube.com/playlist?list=PLVMDcEt2R_Kk')
         continue
 
     # Menu: Community
@@ -2805,7 +3889,7 @@ while True:
     # GRAPHS
 
     # Palette click
-    if action == 'palette':
+    if action == 'palette' or action == 'palette-RIGHTBUTTON':
         mx, my = keys['palette']
         # Calculate the new color index accordingly
         newindex = my // 32 * 32 + mx // 32
@@ -2817,11 +3901,26 @@ while True:
             # Clicked already selected color - edit it
             modify_color()
 
-    # Map click
+    # Map click with left button
     if action == 'colormap':
         mx, my = keys['colormap']
         # Calculate the new color index accordingly
-        Mselcolor = mx // 4
+        col = mx // 4
+        row = my // 8
+        try:
+            Mselcolor = Mcolormap[col][row]
+        except:
+            Mselcolor = 0  # Fallback
+        draw_all()
+
+    # Map click with right button
+    if action == 'colormap-RIGHTBUTTON':
+        mx, my = keys['colormap']
+        # Calculate the new color index accordingly
+        try:
+            Mselcolor = mx // 4
+        except:
+            Mselcolor = 0  # Fallback
         draw_all()
 
     # Light range clicks
@@ -2879,6 +3978,6 @@ while True:
         if Mselcolor >= 256: Mselcolor -= 256
         draw_all()
 
-    # Modify a current color
+    # Modify the current color
     if action == 'Modify color' or action == '/':
         modify_color()
